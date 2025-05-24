@@ -135,16 +135,17 @@ class MetaPlanner:
         layers = {
             "backend": [],
             "middleware": [],
-            "design": [],
             "frontend": []
         }
         
         for component in components:
             layer = component.get("layer", "backend")
-            if layer in layers:
+            # Map all design tasks to frontend
+            if layer == "design":
+                layers["frontend"].append(component)
+            elif layer in layers:
                 layers[layer].append(component)
             else:
-                # If unknown layer, default to backend
                 layers["backend"].append(component)
         
         return layers
@@ -169,6 +170,9 @@ class MetaPlanner:
             component_deps = component.get("dependencies", [])
             component_tech = component.get("tech_stack", [])
             
+            # Map design layer to frontend agent
+            agent_name = "frontend" if component_layer == "design" else component_layer
+            
             # Create a main task for the component
             main_task = {
                 "id": f"task-{component_id}",
@@ -177,6 +181,7 @@ class MetaPlanner:
                 "name": f"Implement {component_name}",
                 "description": f"Implement the {component_name} component. {component_desc}",
                 "layer": component_layer,
+                "agent": agent_name,
                 "dependencies": component_deps,
                 "tech_stack": component_tech
             }

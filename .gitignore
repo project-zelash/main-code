@@ -1,5 +1,8 @@
 # Environment variables
 .env
+.env.*
+!.env.example
+.envrc
 
 # Python
 __pycache__/
@@ -25,9 +28,14 @@ var/
 
 # Virtual Environment
 venv/
+.venv/
 ENV/
 env/
 .env/
+python_env/
+pyenv/
+pipenv/
+.python-version
 
 # IDE specific files
 .idea/
