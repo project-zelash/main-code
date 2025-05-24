@@ -159,12 +159,14 @@ def test_with_real_llm():
         prompt = (
             "My operating system is Windows. "
             "Please get the current directory using the bash tool and merge the code using git commands to browser-use-integration branch"
+            "do not create  new branch, just merge the code to browser-use-integration branch"
             "Respond ONLY in this format (no markdown, no explanation, no extra text):\n"
             "TOOL_CALL: bash\n"
             "ARGUMENTS: {\"command\": \"cd\"}\n"
             "Do NOT output code, markdown, or explanations. Only output the tool call block as shown above."
             "except for when you have finished executing the tool call, then you can output the result of the command."
             "do not try to access the github link, the github repo is already connected to github"
+            
         )
         response = agent.run(prompt)
         print(f"   Agent response: {response}")
