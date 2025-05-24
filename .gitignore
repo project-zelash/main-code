@@ -28,6 +28,8 @@ var/
 
 # Virtual Environment
 venv/
+venv_312/
+test_venv/
 .venv/
 ENV/
 env/
