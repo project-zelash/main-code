@@ -6,10 +6,12 @@ import UserAvatar from '@/components/UserAvatar';
 import { Maximize2, MessageSquare, Copy, Check, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
 
 type MessageBubbleProps = {
   message: Message;
   isLastMessage?: boolean;
+  onAnswerSelect?: (questionMessageId: string, questionText: string, answer: boolean) => void;
 };
 
 // Component to render typing indicator animation
@@ -21,7 +23,130 @@ const TypingIndicator = () => (
   </div>
 );
 
-const MessageBubble = ({ message, isLastMessage = false }: MessageBubbleProps) => {
+// Replace existing formatPlanJsonForDisplay with structured headings and paragraphs:
+const formatPlanJsonForDisplay = (planJson: any): React.ReactNode => {
+  if (!planJson || typeof planJson !== 'object') return null;
+  return (
+    <div className="mt-4 space-y-8 text-gray-200">
+      {/* Title */}
+      {planJson.productName && (
+        <h2 className="text-2xl font-bold text-purple-300 mb-4">
+          {planJson.productName}
+        </h2>
+      )}
+
+      {/* Overview */}
+      {planJson.summary && (
+        <section>
+          <h3 className="text-xl font-semibold text-indigo-400">Overview</h3>
+          <p className="mt-2 text-gray-300 leading-relaxed">{planJson.summary}</p>
+        </section>
+      )}
+
+      {/* Target Audience */}
+      {planJson.targetAudience && (
+        <section>
+          <h3 className="text-xl font-semibold text-indigo-400">Target Audience</h3>
+          <p className="mt-2 text-gray-300 leading-relaxed">{planJson.targetAudience}</p>
+        </section>
+      )}
+
+      {/* Core Features */}
+      {Array.isArray(planJson.coreFeatures) && (
+        <section>
+          <h3 className="text-xl font-semibold text-indigo-400">Core Features</h3>
+          <ul className="mt-2 list-disc list-inside text-gray-300 space-y-1">
+            {planJson.coreFeatures.map((item: string, idx: number) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Key Differentiators */}
+      {Array.isArray(planJson.keyDifferentiators) && (
+        <section>
+          <h3 className="text-xl font-semibold text-indigo-400">Key Differentiators</h3>
+          <ul className="mt-2 list-disc list-inside text-gray-300 space-y-1">
+            {planJson.keyDifferentiators.map((item: string, idx: number) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Monetization Strategy */}
+      {planJson.monetizationStrategy && (
+        <section>
+          <h3 className="text-xl font-semibold text-indigo-400">Monetization Strategy</h3>
+          <p className="mt-2 text-gray-300 leading-relaxed">{planJson.monetizationStrategy}</p>
+        </section>
+      )}
+
+      {/* Technology Stack */}
+      {planJson.technologyStackConsiderations && (
+        <section>
+          <h3 className="text-xl font-semibold text-indigo-400">Technology Stack</h3>
+          <p className="mt-2 text-gray-300 leading-relaxed">{planJson.technologyStackConsiderations}</p>
+        </section>
+      )}
+
+      {/* Non-functional Requirements */}
+      {Array.isArray(planJson.nonFunctionalRequirements) && (
+        <section>
+          <h3 className="text-xl font-semibold text-indigo-400">Non-functional Requirements</h3>
+          <ul className="mt-2 list-disc list-inside text-gray-300 space-y-1">
+            {planJson.nonFunctionalRequirements.map((item: string, idx: number) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* User Stories */}
+      {Array.isArray(planJson.userStories) && (
+        <section>
+          <h3 className="text-xl font-semibold text-indigo-400">User Stories</h3>
+          <ul className="mt-2 list-disc list-inside text-gray-300 space-y-2">
+            {planJson.userStories.map((story: any, idx: number) => (
+              <li key={idx} className="space-y-1">
+                <p><strong>As a</strong> {story.role}</p>
+                <p><strong>I want to</strong> {story.action}</p>
+                <p><strong>So that</strong> {story.reason}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Future Considerations */}
+      {Array.isArray(planJson.futureConsiderations) && (
+        <section>
+          <h3 className="text-xl font-semibold text-indigo-400">Future Considerations</h3>
+          <ul className="mt-2 list-disc list-inside text-gray-300 space-y-1">
+            {planJson.futureConsiderations.map((item: string, idx: number) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Additional Fields */}
+      {Object.entries(planJson).map(([key, value]) => {
+        const skipKeys = ['productName','summary','targetAudience','coreFeatures','keyDifferentiators','monetizationStrategy','technologyStackConsiderations','nonFunctionalRequirements','userStories','futureConsiderations'];
+        if (skipKeys.includes(key)) return null;
+        return (
+          <section key={key}>
+            <h3 className="text-xl font-semibold text-indigo-400 capitalize">{key.replace(/([A-Z])/g, ' $1')}</h3>
+            <p className="mt-2 font-mono text-gray-300 bg-[#1e1e2e] p-2 rounded">{JSON.stringify(value, null, 2)}</p>
+          </section>
+        );
+      })}
+    </div>
+  );
+};
+
+const MessageBubble = ({ message, isLastMessage = false, onAnswerSelect }: MessageBubbleProps) => {
   const isAI = message.role === 'assistant';
   const [isExpanded, setIsExpanded] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
@@ -152,6 +277,35 @@ const MessageBubble = ({ message, isLastMessage = false }: MessageBubbleProps) =
                 <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-[#1a1a2e] prose-pre:border prose-pre:border-white/10">
                   {message.content}
                 </div>
+
+                {/* Conditionally render Yes/No buttons for questions */}
+                {isAI && message.isQuestion && onAnswerSelect && !message.answered && ( // Added !message.answered
+                  <div className="mt-4 flex space-x-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="bg-green-500 hover:bg-green-600 text-white"
+                      onClick={() => onAnswerSelect(message.id, message.content, true)}
+                    >
+                      Yes
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="bg-red-500 hover:bg-red-600 text-white"
+                      onClick={() => onAnswerSelect(message.id, message.content, false)}
+                    >
+                      No
+                    </Button>
+                  </div>
+                )}
+
+                {/* Display formatted JSON plan if available */}
+                {message.planJson && typeof message.planJson === 'object' && Object.keys(message.planJson).length > 0 && (
+                  <div className="mt-4 rounded-md">
+                    {formatPlanJsonForDisplay(message.planJson)}
+                  </div>
+                )}
                 
                 {/* Render any images */}
                 {message.images && message.images.length > 0 && (
