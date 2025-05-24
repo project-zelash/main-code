@@ -158,7 +158,7 @@ def test_with_real_llm():
         # Strongly specify the OS and required format
         prompt = (
             "My operating system is Windows. "
-            "Please get the current directory using the bash tool and add the code in it to github, create a new branch and git add,commit and push using the bash tool. "
+            "Please get the current directory using the bash tool and merge the code using git commands to browser-use-integration branch"
             "Respond ONLY in this format (no markdown, no explanation, no extra text):\n"
             "TOOL_CALL: bash\n"
             "ARGUMENTS: {\"command\": \"cd\"}\n"
