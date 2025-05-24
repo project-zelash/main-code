@@ -2,6 +2,7 @@ from src.repository.agent.general_agent import GeneralAgent
 from src.repository.agent.research_agent import ResearchAgent
 from src.repository.agent.analysis_agent import AnalysisAgent
 from src.repository.agent.writing_agent import WritingAgent
+from src.repository.agent.tool_call_agent import ToolCallAgent as ManusAgent
 from src.repository.tools.base_tool import BaseTool
 from src.repository.llm.base_language_model import BaseLanguageModel
 
@@ -54,8 +55,7 @@ class AgentService:
                 system_prompt=agent_config.get("system_prompt"),
                 name=agent_config.get("name", "ManusAgent"),
                 verbose=agent_config.get("verbose", False),
-                max_iterations=agent_config.get("max_iterations", 5),
-                memory_enabled=agent_config.get("memory_enabled", True)
+                max_iterations=agent_config.get("max_iterations", 5)
             )
         elif agent_type == "research":
             agent = ResearchAgent(
@@ -63,8 +63,7 @@ class AgentService:
                 tools=tools,
                 name=agent_config.get("name", "ResearchAgent"),
                 verbose=agent_config.get("verbose", False),
-                max_iterations=agent_config.get("max_iterations", 5),
-                memory_enabled=agent_config.get("memory_enabled", True)
+                max_iterations=agent_config.get("max_iterations", 5)
             )
         elif agent_type == "analysis":
             agent = AnalysisAgent(
@@ -72,8 +71,7 @@ class AgentService:
                 tools=tools,
                 name=agent_config.get("name", "AnalysisAgent"),
                 verbose=agent_config.get("verbose", False),
-                max_iterations=agent_config.get("max_iterations", 5),
-                memory_enabled=agent_config.get("memory_enabled", True)
+                max_iterations=agent_config.get("max_iterations", 5)
             )
         elif agent_type == "writing":
             agent = WritingAgent(
@@ -81,8 +79,7 @@ class AgentService:
                 tools=tools,
                 name=agent_config.get("name", "WritingAgent"),
                 verbose=agent_config.get("verbose", False),
-                max_iterations=agent_config.get("max_iterations", 5),
-                memory_enabled=agent_config.get("memory_enabled", True)
+                max_iterations=agent_config.get("max_iterations", 5)
             )
         elif agent_type == "general":
             agent = GeneralAgent(
@@ -90,8 +87,7 @@ class AgentService:
                 tools=tools,
                 name=agent_config.get("name", "GeneralAgent"),
                 verbose=agent_config.get("verbose", False),
-                max_iterations=agent_config.get("max_iterations", 5),
-                memory_enabled=agent_config.get("memory_enabled", True)
+                max_iterations=agent_config.get("max_iterations", 5)
             )
         else:
             raise ValueError(f"Unknown agent type: {agent_type}")

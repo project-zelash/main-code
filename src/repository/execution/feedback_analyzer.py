@@ -1,5 +1,7 @@
+import os
 from typing import Dict, List, Any, Optional
 import json
+import re # Import re for regex operations
 
 from src.service.llm_factory import LLMFactory
 
@@ -16,40 +18,84 @@ class FeedbackAnalyzer:
             llm_factory: Factory for creating LLM instances.
         """
         self.llm_factory = llm_factory
-        self.llm = llm_factory.create_llm("gemini", "gemini-1.5-pro", temperature=0.3)
+        self.llm = llm_factory.create_llm("gemini", model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-2.0-flash"), temperature=0.3) # Allow model override
         self.previous_results = None
     
-    def classify_issues(self, test_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def classify_issues(self, test_results_input: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analyze test results and classify issues.
+        Analyze test results, classify issues, and suggest fix tasks.
         
         Args:
-            test_results: Results from tests (can include build results, static analysis, unit tests, etc.)
+            test_results_input: Results from tests (can include build results, static analysis, unit tests, etc.)
             
         Returns:
-            List of classified issues.
+            Dictionary containing analysis success, issues found, classified issues, and fix tasks.
         """
         # Convert test results to a standardized format
-        formatted_results = self._format_test_results(test_results)
+        formatted_results = self._format_test_results(test_results_input)
         
-        # Create a prompt for issue classification
+        # Create a prompt for issue classification and fix task generation
         prompt = self._create_classification_prompt(formatted_results)
         
         # Run LLM to classify issues
         messages = [
-            {"role": "system", "content": "You are an expert software engineer specializing in debugging and issue analysis."},
+            {"role": "system", "content": "You are an expert software engineer specializing in debugging, issue analysis, and proposing actionable fix tasks. Your output MUST be a single, valid JSON object, with no surrounding text or markdown formatting."},
             {"role": "user", "content": prompt}
         ]
         
-        response = self.llm.chat(messages)
-        
-        # Extract and process the classification
-        classified_issues = self._extract_classified_issues(response.get("content", ""))
-        
-        # Store results for future progress comparison
-        self.previous_results = test_results
-        
-        return classified_issues
+        llm_response_content = ""
+        try:
+            response = self.llm.chat(messages)
+            llm_response_content = response.get("content", "")
+            
+            # Extract and process the classification and fix tasks
+            analysis_output = self._extract_analysis_from_response(llm_response_content)
+
+            # Store results for future progress comparison
+            self.previous_results = test_results_input # Store the original input
+
+            if analysis_output.get("parsing_error"): # Check if parsing itself failed
+                return {
+                    "success": False,
+                    "issues_found": True, # Assume issues if parsing failed
+                    "analysis": analysis_output, # Contains the parsing error details
+                    "message": f"Failed to parse LLM response: {analysis_output['parsing_error_message']}"
+                }
+
+            if not analysis_output.get("issues") and not analysis_output.get("fix_tasks"):
+                # If LLM returns empty valid JSON, it means no issues were identified from the input
+                 return {
+                    "success": True,
+                    "issues_found": False,
+                    "analysis": {"issues": [], "fix_tasks": []},
+                    "message": "Analysis complete. No actionable issues or fix tasks identified by LLM."
+                }
+            
+            return {
+                "success": True,
+                "issues_found": bool(analysis_output.get("issues")), # True if there are any issues
+                "analysis": analysis_output, # Contains "issues" and "fix_tasks"
+                "message": "Analysis and fix task suggestion complete."
+            }
+
+        except Exception as e:
+            # Log this error appropriately if you have a logging mechanism
+            error_message = f"Error during LLM call or processing in FeedbackAnalyzer: {str(e)}. LLM response snippet: {llm_response_content[:500]}"
+            print(error_message) # Or use a proper logger
+            return {
+                "success": False,
+                "issues_found": True, # Assume issues if analysis fails
+                "analysis": {
+                    "issues": [{
+                        "type": "analyzer_error", "severity": "critical", "component": "FeedbackAnalyzer",
+                        "layer": "N/A", "message": f"Failed during analysis: {str(e)}",
+                        "cause": "LLM interaction or response processing failed. Check logs for details.",
+                        "affected_files": []
+                    }],
+                    "fix_tasks": []
+                },
+                "message": f"Error during feedback analysis: {str(e)}"
+            }
     
     def _format_test_results(self, test_results: Dict[str, Any]) -> str:
         """
@@ -136,79 +182,145 @@ class FeedbackAnalyzer:
         Returns:
             Classification prompt.
         """
-        return f"""
-        Analyze these test results and classify all issues found:
-        
-        {formatted_results}
-        
-        For each issue, provide:
-        1. The type of issue (build error, runtime error, logical error, security issue, etc.)
-        2. The severity (critical, high, medium, low)
-        3. The affected component or layer
-        4. A clear description of the problem
-        5. The most likely cause
-        6. A suggested approach to fix it
-        
-        Return your analysis as a JSON array with this structure:
-        [
-            {{
-                "type": "string",
-                "severity": "critical|high|medium|low",
-                "component": "string",
-                "layer": "backend|middleware|design|frontend",
-                "message": "string",
-                "cause": "string",
-                "fix_approach": "string"
-            }}
-        ]
-        
-        Output ONLY valid JSON without any explanations or markdown.
-        """
+        return (
+            "Analyze these test results and classify all issues found:\n"
+            + formatted_results +
+            """
+For each issue, provide:
+1. The type of issue (e.g., build_error, runtime_error, logical_error, security_vulnerability, performance_bottleneck, ui_glitch, data_corruption, configuration_error, test_failure_incorrect_logic, dependency_conflict).
+2. The severity (critical, high, medium, low).
+3. The affected component or specific module name (e.g., 'user_authentication_module', 'api_gateway_routing', 'shopping_cart_ui_state_management').
+4. A clear, concise description of the problem, referencing specific error messages or test failures.
+5. The most likely root cause, being as specific as possible.
+6. A detailed, actionable, step-by-step suggested approach to fix it. This should be concrete enough for another LLM to implement the fix.
+7. The specific file(s) and ideally line number(s) or function/class names that likely need modification. If multiple files, list them.
+
+Return your analysis as a SINGLE, VALID JSON OBJECT with two top-level keys: "issues" and "fix_tasks".
+The "issues" key should have an array of issue objects.
+The "fix_tasks" key should have an array of task objects, where each task aims to resolve one or more identified issues.
+
+IMPORTANT: Your entire response MUST be only the JSON object. Do not include any explanatory text, markdown formatting (like ```json), or any other characters before or after the JSON object.
+
+JSON Structure Example:
+{
+    "issues": [
+        {
+            "type": "runtime_error",
+            "severity": "high",
+            "component": "payment_processing_service",
+            "layer": "backend",
+            "message": "NullPointerException when processing Visa payments for amounts over $1000.",
+            "cause": "The 'discount_code_object' is null for high-value transactions if no discount is applied, but its properties are accessed directly.",
+            "affected_files": [
+                { "path": "src/services/payment_processor.py", "details": "process_visa function, around line 155" }
+            ]
+        }
+    ],
+    "fix_tasks": [
+        {
+            "task_id": "fix_payment_npe_001",
+            "description": "Add a null check for 'discount_code_object' before accessing its properties in 'process_visa' function within 'payment_processor.py'. If null, use default values or skip discount logic.",
+            "target_layer": "backend",
+            "target_components": ["payment_processing_service"],
+            "related_issue_messages": ["NullPointerException when processing Visa payments for amounts over $1000."],
+            "estimated_complexity": "low",
+            "suggested_implementation_details": "In 'payment_processor.py', locate the 'process_visa' function. Before the line 'final_amount -= discount_code_object.value', insert: 'if discount_code_object is not None and hasattr(discount_code_object, 'value'):'. Ensure to handle the 'else' case appropriately, perhaps by logging or applying no discount."
+        }
+    ]
+}
+If no issues are found from the provided test results, return exactly this JSON:
+{
+    "issues": [],
+    "fix_tasks": []
+}
+""")
     
-    def _extract_classified_issues(self, response: str) -> List[Dict[str, Any]]:
+    def _extract_analysis_from_response(self, response: str) -> Dict[str, Any]: # Return type changed to Dict[str, Any] to include potential parsing error flags
         """
-        Extract classified issues from LLM response.
+        Extract classified issues and fix_tasks from LLM response.
+        Handles potential markdown code blocks and validates structure.
         
         Args:
             response: LLM response text.
             
         Returns:
-            List of classified issues.
+            A dictionary with "issues" and "fix_tasks" lists, or error flags if parsing fails.
         """
         try:
-            # Find where the JSON array starts and ends
-            json_start = response.find('[')
-            json_end = response.rfind(']') + 1
+            # Strip markdown code block fences if present
+            # Handles ```json ... ``` or ``` ... ```
+            cleaned_response = re.sub(r'^```(?:json)?\n?|\n?```$', '', response.strip(), flags=re.MULTILINE)
+
+            # Attempt to find JSON object, robustly handling potential surrounding text if regex didn't catch it all
+            # This is a fallback if the LLM still includes minor non-JSON text despite prompt instructions.
+            json_start = cleaned_response.find('{')
+            json_end = cleaned_response.rfind('}') + 1
             
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
-                return json.loads(json_str)
+            if json_start != -1 and json_end > json_start:
+                json_str = cleaned_response[json_start:json_end]
+                
+                try:
+                    parsed_json = json.loads(json_str)
+                except json.JSONDecodeError as e_json_specific:
+                    error_msg = f"JSONDecodeError: {e_json_specific} when parsing string."
+                    # Log this specific error for better debugging
+                    print(f"FeedbackAnalyzer: {error_msg} Parsed JSON: {json_str[:500]}")
+                    return {"parsing_error": True, "error_message": error_msg, "raw_response": response}
+                
+                # Validate basic structure
+                if isinstance(parsed_json, dict) and \
+                   "issues" in parsed_json and \
+                   "fix_tasks" in parsed_json and \
+                   isinstance(parsed_json["issues"], list) and \
+                   isinstance(parsed_json["fix_tasks"], list):
+                    return parsed_json 
+                else:
+                    # Log an issue about the unexpected structure
+                    error_msg = "LLM response was parsed but has an unexpected structure."
+                    attempted_parse_snippet = f" Parsed JSON snippet: {json_str[:500]}" if json_str else ""
+                    print(f"FeedbackAnalyzer: {error_msg}{attempted_parse_snippet}") # This is the area of the original error at line 338
+                    return {
+                        "parsing_error": True, 
+                        "error_message": f"{error_msg}{attempted_parse_snippet}",
+                        "issues": [], 
+                        "fix_tasks": []
+                    }
             else:
-                # Return empty list if no JSON found
-                return []
+                # Could not find a JSON object
+                error_msg = "Could not find JSON object in LLM response."
+                print(f"FeedbackAnalyzer: {error_msg} Cleaned Response: {cleaned_response[:500]}")
+                return {
+                    "parsing_error": True,
+                    "parsing_error_message": error_msg,
+                    "issues": [],
+                    "fix_tasks": []
+                }
                 
         except (ValueError, json.JSONDecodeError) as e:
-            # Return error as a single issue if parsing fails
-            return [{
-                "type": "parsing_error",
-                "severity": "low",
-                "component": "feedback_analyzer",
-                "layer": "backend",
-                "message": f"Failed to parse LLM response: {str(e)}",
-                "cause": "LLM returned malformed JSON",
-                "fix_approach": "Retry analysis with more explicit JSON formatting instructions"
-            }]
-    
+            # Log this error
+            error_msg = f"Failed to parse LLM response into JSON: {str(e)}."
+            # Try to provide a snippet of what was attempted to be parsed if json_str was defined
+            attempted_parse_snippet = ""
+            if 'json_str' in locals() and json_str:
+                attempted_parse_snippet = f" Attempted to parse: {json_str[:500]}"
+            elif 'cleaned_response' in locals() and cleaned_response:
+                attempted_parse_snippet = f" Cleaned response was: {cleaned_response[:500]}"
+            else:
+                attempted_parse_snippet = f" Original response was: {response[:500]}"
+
+            print(f"FeedbackAnalyzer: {error_msg}{attempted_parse_snippet}")
+            return {
+                "parsing_error": True,
+                "parsing_error_message": f"{error_msg}{attempted_parse_snippet}",
+                "issues": [], # Ensure keys exist even on parsing error
+                "fix_tasks": []
+            }
+
     def extract_error_context(self, issues: List[Dict[str, Any]], project_files: Dict[str, str]) -> Dict[str, Any]:
         """
         Extract additional context for issues from project files.
-        
-        Args:
-            issues: Classified issues.
-            project_files: Dictionary mapping file paths to content.
-            
-        Returns:
-            Issues with added context.
+        This method might be less critical if the LLM in classify_issues already handles file context well.
+        Consider if this is still needed or if its logic should be merged/simplified.
         """
         enriched_issues = []
         
