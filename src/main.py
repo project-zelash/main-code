@@ -13,6 +13,7 @@ from fastapi import FastAPI
 # Application components
 from src.api.agent_controller import AgentController
 from src.api.tool_controller import ToolController
+from src.api.orchestration_controller import OrchestrationController, get_orchestration_engine
 from src.service.agent_service import AgentService
 from src.service.llm_factory import LLMFactory
 from src.service.tool_service import ToolService
@@ -27,10 +28,14 @@ def create_app():
         Configured FastAPI application.
     """
     # Create FastAPI app
-    app = AgentController.create_app()
+    app = FastAPI(
+        title="Zelash AI Framework",
+        description="A fully Python-based, AI-powered developer assistant.",
+        version="0.1.0"
+    )
     
     # Initialize services
-    llm_factory = LLMFactory(config={
+    llm_config = {
         'gemini': {
             'api_key': os.environ.get('GEMINI_API_KEY'),
             'model': os.environ.get('GEMINI_MODEL', 'gemini-1.5-pro'),
@@ -51,9 +56,10 @@ def create_app():
             'model': os.environ.get('BEDROCK_MODEL', 'anthropic.claude-v2'),
             'temperature': 0.7
         }
-    })
+    }
+    llm_factory = LLMFactory(config=llm_config)
     
-    tool_service = ToolService(config={
+    tool_config = {
         'web_search': {
             'api_key': os.environ.get('GOOGLE_SEARCH_API_KEY'),
             'engine_id': os.environ.get('GOOGLE_SEARCH_ENGINE_ID')
@@ -67,15 +73,20 @@ def create_app():
         'chart': {
             'script_path': os.path.join(os.path.dirname(__file__), 'chart_generator.js')
         }
-    })
+    }
+    tool_service = ToolService(config=tool_config, llm_factory=llm_factory)
     
     agent_service = AgentService(llm_factory, tool_service)
+    
+    # Get the OrchestrationEngine instance
+    orchestration_engine_instance = get_orchestration_engine()
     
     # Register controllers
     AgentController(app, agent_service)
     ToolController(app, tool_service)
+    OrchestrationController(app, orchestration_engine_instance)
     
-    return app, agent_service, tool_service
+    return app, agent_service, tool_service, orchestration_engine_instance
 
 def main():
     """
@@ -93,7 +104,7 @@ def main():
     
     if args.mode == "api":
         # Run FastAPI server
-        app, _, _ = create_app()
+        app, _, _, _ = create_app()
         uvicorn.run(app, host=args.host, port=args.port)
     
     elif args.mode == "cli":
@@ -103,7 +114,7 @@ def main():
     
     elif args.mode == "web":
         # Run Web UI mode
-        _, agent_service, tool_service = create_app()
+        _, agent_service, tool_service, _ = create_app()
         web_ui = WebUI()
         web_ui.load_tools(tool_service.tools)
         web_ui.launch_ui(share=args.share)
