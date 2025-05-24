@@ -36,6 +36,8 @@ class GeminiLLM(BaseLanguageModel):
         
         # Initialize Gemini API client
         if self.api_key:
+            # Set environment variable for Google AI to use
+            os.environ['GOOGLE_API_KEY'] = self.api_key
             genai.configure(api_key=self.api_key)
         else:
             raise ValueError("GEMINI_API_KEY not provided and not found in environment variables")

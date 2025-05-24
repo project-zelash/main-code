@@ -1,3 +1,4 @@
+import os
 from typing import Dict, List, Any, Optional
 import json
 import re # Import re for regex operations
@@ -17,10 +18,10 @@ class FeedbackAnalyzer:
             llm_factory: Factory for creating LLM instances.
         """
         self.llm_factory = llm_factory
-        self.llm = llm_factory.create_llm("gemini", model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-1.5-pro"), temperature=0.3) # Allow model override
+        self.llm = llm_factory.create_llm("gemini", model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-2.0-flash"), temperature=0.3) # Allow model override
         self.previous_results = None
     
-    def classify_issues(self, test_results_input: Dict[str, Any]) -> Dict[str, Any]: # Return type changed
+    def classify_issues(self, test_results_input: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analyze test results, classify issues, and suggest fix tasks.
         
@@ -38,14 +39,14 @@ class FeedbackAnalyzer:
         
         # Run LLM to classify issues
         messages = [
-            {\"role\": \"system\", \"content\": \"You are an expert software engineer specializing in debugging, issue analysis, and proposing actionable fix tasks. Your output MUST be a single, valid JSON object, with no surrounding text or markdown formatting.\"},
-            {\"role\": \"user\", \"content\": prompt}
+            {"role": "system", "content": "You are an expert software engineer specializing in debugging, issue analysis, and proposing actionable fix tasks. Your output MUST be a single, valid JSON object, with no surrounding text or markdown formatting."},
+            {"role": "user", "content": prompt}
         ]
         
         llm_response_content = ""
         try:
             response = self.llm.chat(messages)
-            llm_response_content = response.get(\"content\", \"\")
+            llm_response_content = response.get("content", "")
             
             # Extract and process the classification and fix tasks
             analysis_output = self._extract_analysis_from_response(llm_response_content)
@@ -53,47 +54,47 @@ class FeedbackAnalyzer:
             # Store results for future progress comparison
             self.previous_results = test_results_input # Store the original input
 
-            if analysis_output.get(\"parsing_error\"): # Check if parsing itself failed
+            if analysis_output.get("parsing_error"): # Check if parsing itself failed
                 return {
-                    \"success\": False,
-                    \"issues_found\": True, # Assume issues if parsing failed
-                    \"analysis\": analysis_output, # Contains the parsing error details
-                    \"message\": f\"Failed to parse LLM response: {analysis_output['parsing_error_message']}\"
+                    "success": False,
+                    "issues_found": True, # Assume issues if parsing failed
+                    "analysis": analysis_output, # Contains the parsing error details
+                    "message": f"Failed to parse LLM response: {analysis_output['parsing_error_message']}"
                 }
 
-            if not analysis_output.get(\"issues\") and not analysis_output.get(\"fix_tasks\"):
+            if not analysis_output.get("issues") and not analysis_output.get("fix_tasks"):
                 # If LLM returns empty valid JSON, it means no issues were identified from the input
                  return {
-                    \"success\": True,
-                    \"issues_found\": False,
-                    \"analysis\": {\"issues\": [], \"fix_tasks\": []},
-                    \"message\": \"Analysis complete. No actionable issues or fix tasks identified by LLM.\"
+                    "success": True,
+                    "issues_found": False,
+                    "analysis": {"issues": [], "fix_tasks": []},
+                    "message": "Analysis complete. No actionable issues or fix tasks identified by LLM."
                 }
             
             return {
-                \"success\": True,
-                \"issues_found\": bool(analysis_output.get(\"issues\")), # True if there are any issues
-                \"analysis\": analysis_output, # Contains \"issues\" and \"fix_tasks\"
-                \"message\": \"Analysis and fix task suggestion complete.\"
+                "success": True,
+                "issues_found": bool(analysis_output.get("issues")), # True if there are any issues
+                "analysis": analysis_output, # Contains "issues" and "fix_tasks"
+                "message": "Analysis and fix task suggestion complete."
             }
 
         except Exception as e:
             # Log this error appropriately if you have a logging mechanism
-            error_message = f\"Error during LLM call or processing in FeedbackAnalyzer: {str(e)}. LLM response snippet: {llm_response_content[:500]}\"
+            error_message = f"Error during LLM call or processing in FeedbackAnalyzer: {str(e)}. LLM response snippet: {llm_response_content[:500]}"
             print(error_message) # Or use a proper logger
             return {
-                \"success\": False,
-                \"issues_found\": True, # Assume issues if analysis fails
-                \"analysis\": {
-                    \"issues\": [{\
-                        \"type\": \"analyzer_error\", \"severity\": \"critical\", \"component\": \"FeedbackAnalyzer\",
-                        \"layer\": \"N/A\", \"message\": f\"Failed during analysis: {str(e)}\",
-                        \"cause\": \"LLM interaction or response processing failed. Check logs for details.\",
-                        \"affected_files\": []
+                "success": False,
+                "issues_found": True, # Assume issues if analysis fails
+                "analysis": {
+                    "issues": [{
+                        "type": "analyzer_error", "severity": "critical", "component": "FeedbackAnalyzer",
+                        "layer": "N/A", "message": f"Failed during analysis: {str(e)}",
+                        "cause": "LLM interaction or response processing failed. Check logs for details.",
+                        "affected_files": []
                     }],
-                    \"fix_tasks\": []
+                    "fix_tasks": []
                 },
-                \"message\": f\"Error during feedback analysis: {str(e)}\"
+                "message": f"Error during feedback analysis: {str(e)}"
             }
     
     def _format_test_results(self, test_results: Dict[str, Any]) -> str:
@@ -181,61 +182,58 @@ class FeedbackAnalyzer:
         Returns:
             Classification prompt.
         """
-        # Added a more complete example in the prompt
-        return f\"\"\"
-        Analyze these test results and classify all issues found:
-        
-        {formatted_results}
-        
-        For each issue, provide:
-        1. The type of issue (e.g., build_error, runtime_error, logical_error, security_vulnerability, performance_bottleneck, ui_glitch, data_corruption, configuration_error, test_failure_incorrect_logic, dependency_conflict).
-        2. The severity (critical, high, medium, low).
-        3. The affected component or specific module name (e.g., 'user_authentication_module', 'api_gateway_routing', 'shopping_cart_ui_state_management').
-        4. A clear, concise description of the problem, referencing specific error messages or test failures.
-        5. The most likely root cause, being as specific as possible.
-        6. A detailed, actionable, step-by-step suggested approach to fix it. This should be concrete enough for another LLM to implement the fix.
-        7. The specific file(s) and ideally line number(s) or function/class names that likely need modification. If multiple files, list them.
+        return (
+            "Analyze these test results and classify all issues found:\n"
+            + formatted_results +
+            """
+For each issue, provide:
+1. The type of issue (e.g., build_error, runtime_error, logical_error, security_vulnerability, performance_bottleneck, ui_glitch, data_corruption, configuration_error, test_failure_incorrect_logic, dependency_conflict).
+2. The severity (critical, high, medium, low).
+3. The affected component or specific module name (e.g., 'user_authentication_module', 'api_gateway_routing', 'shopping_cart_ui_state_management').
+4. A clear, concise description of the problem, referencing specific error messages or test failures.
+5. The most likely root cause, being as specific as possible.
+6. A detailed, actionable, step-by-step suggested approach to fix it. This should be concrete enough for another LLM to implement the fix.
+7. The specific file(s) and ideally line number(s) or function/class names that likely need modification. If multiple files, list them.
 
-        Return your analysis as a SINGLE, VALID JSON OBJECT with two top-level keys: "issues" and "fix_tasks".
-        The "issues" key should have an array of issue objects.
-        The "fix_tasks" key should have an array of task objects, where each task aims to resolve one or more identified issues.
+Return your analysis as a SINGLE, VALID JSON OBJECT with two top-level keys: "issues" and "fix_tasks".
+The "issues" key should have an array of issue objects.
+The "fix_tasks" key should have an array of task objects, where each task aims to resolve one or more identified issues.
 
-        IMPORTANT: Your entire response MUST be only the JSON object. Do not include any explanatory text, markdown formatting (like ```json), or any other characters before or after the JSON object.
+IMPORTANT: Your entire response MUST be only the JSON object. Do not include any explanatory text, markdown formatting (like ```json), or any other characters before or after the JSON object.
 
-        JSON Structure Example:
-        {{
-            "issues": [
-                {{
-                    "type": "runtime_error",
-                    "severity": "high",
-                    "component": "payment_processing_service",
-                    "layer": "backend",
-                    "message": "NullPointerException when processing Visa payments for amounts over $1000.",
-                    "cause": "The 'discount_code_object' is null for high-value transactions if no discount is applied, but its properties are accessed directly.",
-                    "affected_files": [ 
-                        {{ "path": "src/services/payment_processor.py", "details": "process_visa function, around line 155" }}
-                    ]
-                }}
-            ],
-            "fix_tasks": [
-                {{
-                    "task_id": "fix_payment_npe_001",
-                    "description": "Add a null check for 'discount_code_object' before accessing its properties in 'process_visa' function within 'payment_processor.py'. If null, use default values or skip discount logic.",
-                    "target_layer": "backend",
-                    "target_components": ["payment_processing_service"],
-                    "related_issue_messages": ["NullPointerException when processing Visa payments for amounts over $1000."],
-                    "estimated_complexity": "low",
-                    "suggested_implementation_details": "In 'payment_processor.py', locate the 'process_visa' function. Before the line 'final_amount -= discount_code_object.value', insert: 'if discount_code_object is not None and hasattr(discount_code_object, 'value'):'. Ensure to handle the 'else' case appropriately, perhaps by logging or applying no discount."
-                }}
+JSON Structure Example:
+{
+    "issues": [
+        {
+            "type": "runtime_error",
+            "severity": "high",
+            "component": "payment_processing_service",
+            "layer": "backend",
+            "message": "NullPointerException when processing Visa payments for amounts over $1000.",
+            "cause": "The 'discount_code_object' is null for high-value transactions if no discount is applied, but its properties are accessed directly.",
+            "affected_files": [
+                { "path": "src/services/payment_processor.py", "details": "process_visa function, around line 155" }
             ]
-        }}
-        
-        If no issues are found from the provided test results, return exactly this JSON:
-        {{
-            "issues": [],
-            "fix_tasks": []
-        }}
-        \"\"\"
+        }
+    ],
+    "fix_tasks": [
+        {
+            "task_id": "fix_payment_npe_001",
+            "description": "Add a null check for 'discount_code_object' before accessing its properties in 'process_visa' function within 'payment_processor.py'. If null, use default values or skip discount logic.",
+            "target_layer": "backend",
+            "target_components": ["payment_processing_service"],
+            "related_issue_messages": ["NullPointerException when processing Visa payments for amounts over $1000."],
+            "estimated_complexity": "low",
+            "suggested_implementation_details": "In 'payment_processor.py', locate the 'process_visa' function. Before the line 'final_amount -= discount_code_object.value', insert: 'if discount_code_object is not None and hasattr(discount_code_object, 'value'):'. Ensure to handle the 'else' case appropriately, perhaps by logging or applying no discount."
+        }
+    ]
+}
+If no issues are found from the provided test results, return exactly this JSON:
+{
+    "issues": [],
+    "fix_tasks": []
+}
+""")
     
     def _extract_analysis_from_response(self, response: str) -> Dict[str, Any]: # Return type changed to Dict[str, Any] to include potential parsing error flags
         """
@@ -251,7 +249,7 @@ class FeedbackAnalyzer:
         try:
             # Strip markdown code block fences if present
             # Handles ```json ... ``` or ``` ... ```
-            cleaned_response = re.sub(r\"^```(?:json)?\\n?|\\n?```$\", \"\", response.strip(), flags=re.MULTILINE)
+            cleaned_response = re.sub(r'^```(?:json)?\n?|\n?```$', '', response.strip(), flags=re.MULTILINE)
 
             # Attempt to find JSON object, robustly handling potential surrounding text if regex didn't catch it all
             # This is a fallback if the LLM still includes minor non-JSON text despite prompt instructions.
@@ -267,18 +265,13 @@ class FeedbackAnalyzer:
                     error_msg = f"JSONDecodeError: {e_json_specific} when parsing string."
                     # Log this specific error for better debugging
                     print(f"FeedbackAnalyzer: {error_msg} Parsed JSON: {json_str[:500]}")
-                    self._log_feedback_analyzer_error(
-                        method_name="_extract_analysis_from_response",
-                        message=error_msg,
-                        details={"json_string_snippet": json_str[:500], "raw_response_snippet": response[:500], "error": str(e_json_specific)}
-                    )
                     return {"parsing_error": True, "error_message": error_msg, "raw_response": response}
                 
                 # Validate basic structure
-                if isinstance(parsed_json, dict) and \\
-                   "issues" in parsed_json and \\
-                   "fix_tasks" in parsed_json and \\
-                   isinstance(parsed_json["issues"], list) and \\
+                if isinstance(parsed_json, dict) and \
+                   "issues" in parsed_json and \
+                   "fix_tasks" in parsed_json and \
+                   isinstance(parsed_json["issues"], list) and \
                    isinstance(parsed_json["fix_tasks"], list):
                     return parsed_json 
                 else:
@@ -286,11 +279,6 @@ class FeedbackAnalyzer:
                     error_msg = "LLM response was parsed but has an unexpected structure."
                     attempted_parse_snippet = f" Parsed JSON snippet: {json_str[:500]}" if json_str else ""
                     print(f"FeedbackAnalyzer: {error_msg}{attempted_parse_snippet}") # This is the area of the original error at line 338
-                    self._log_feedback_analyzer_error(
-                        method_name="_extract_analysis_from_response",
-                        message=error_msg,
-                        details={"parsed_json_snippet": json_str[:500], "raw_response_snippet": response[:500]}
-                    )
                     return {
                         "parsing_error": True, 
                         "error_message": f"{error_msg}{attempted_parse_snippet}",
@@ -310,20 +298,20 @@ class FeedbackAnalyzer:
                 
         except (ValueError, json.JSONDecodeError) as e:
             # Log this error
-            error_msg = f\"Failed to parse LLM response into JSON: {str(e)}.\"
+            error_msg = f"Failed to parse LLM response into JSON: {str(e)}."
             # Try to provide a snippet of what was attempted to be parsed if json_str was defined
             attempted_parse_snippet = ""
             if 'json_str' in locals() and json_str:
-                attempted_parse_snippet = f\" Attempted to parse: {json_str[:500]}\"
+                attempted_parse_snippet = f" Attempted to parse: {json_str[:500]}"
             elif 'cleaned_response' in locals() and cleaned_response:
-                attempted_parse_snippet = f\" Cleaned response was: {cleaned_response[:500]}\"
+                attempted_parse_snippet = f" Cleaned response was: {cleaned_response[:500]}"
             else:
-                attempted_parse_snippet = f\" Original response was: {response[:500]}\"
+                attempted_parse_snippet = f" Original response was: {response[:500]}"
 
-            print(f\"FeedbackAnalyzer: {error_msg}{attempted_parse_snippet}\")
+            print(f"FeedbackAnalyzer: {error_msg}{attempted_parse_snippet}")
             return {
                 "parsing_error": True,
-                "parsing_error_message": f\"{error_msg}{attempted_parse_snippet}\",
+                "parsing_error_message": f"{error_msg}{attempted_parse_snippet}",
                 "issues": [], # Ensure keys exist even on parsing error
                 "fix_tasks": []
             }

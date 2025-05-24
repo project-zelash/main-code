@@ -63,7 +63,7 @@ class LLMFactory:
         
         elif provider == 'gemini':
             if not model:
-                model = 'gemini-1.5-pro'
+                model = 'gemini-2.0-flash'  # Use Gemini 2.0 Flash as the default
             return GeminiLLM(model=model, api_key=api_key, temperature=temperature)
         
         else:

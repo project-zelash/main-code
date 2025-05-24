@@ -3,7 +3,6 @@ from typing import Any, Dict, Optional
 from src.repository.agent.backend_agent import BackendAgent
 from src.repository.agent.frontend_agent import FrontendAgent
 from src.repository.agent.middleware_agent import MiddlewareAgent
-from src.repository.agent.design_agent import DesignAgent
 from src.service.llm_factory import LLMFactory
 from src.service.tool_service import ToolService
 
@@ -16,8 +15,8 @@ class AgentManager:
 
     def _initialize_agents(self):
         if not self.agents:
-            llm = self.llm_factory.create_llm("gemini", "gemini-1.5-pro")
-            tools = self.tool_service.get_tools()
+            llm = self.llm_factory.create_llm("gemini", "gemini-2.0-flash")
+            tools = list(self.tool_service.get_tools().values())  # Ensure this is a list of tool instances
             # Register all default agents with a consistent structure
             self.register_agent(
                 "backend",
@@ -40,16 +39,6 @@ class AgentManager:
                 capabilities={"type": "middleware"}
             )
             self.register_agent(
-                "design",
-                DesignAgent(
-                    llm=llm,
-                    tools=tools,
-                    name="DesignAgent",
-                    verbose=True
-                ),
-                capabilities={"type": "design"}
-            )
-            self.register_agent(
                 "frontend",
                 FrontendAgent(
                     llm=llm,
@@ -59,6 +48,7 @@ class AgentManager:
                 ),
                 capabilities={"type": "frontend"}
             )
+            # Do NOT register design agent
 
     def register_agent(self, agent_name: str, agent_instance: Any, capabilities: dict = None) -> None:
         self.agents[agent_name] = {
@@ -86,3 +76,6 @@ class AgentManager:
         if entry:
             return entry.get("instance")
         return None
+
+    def initialize_agents(self):
+        return self._initialize_agents()
