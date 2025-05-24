@@ -1,9 +1,11 @@
 import os
+import sys
 import dotenv
 from src.repository.execution.orchestration_engine import OrchestrationEngine
 from src.service.llm_factory import LLMFactory
 from src.service.tool_service import ToolService
 from src.repository.tools.bash_tool import BashTool
+from src.utils.prompt_manager import get_user_prompt, get_prompt_from_args
 
 def get_manual_tool_service():
     from src.service.tool_service import ToolService
@@ -60,7 +62,16 @@ def main():
     tool_service = get_manual_tool_service()
     engine = OrchestrationEngine(workspace, llm_factory, tool_service)
 
-    user_prompt = "Build a simple to-do app with backend and frontend using FastAPI and React."
+    # Get user prompt dynamically instead of hardcoding
+    # You can change the method here:
+    # - "interactive": Ask user for input
+    # - "preset": Use a preset (e.g., get_user_prompt("preset", prompt_key="todo_app"))
+    # - "custom": Pass custom prompt (e.g., get_user_prompt("custom", custom_prompt="Your prompt"))
+    # - "env": Use ORCHESTRATION_PROMPT environment variable
+    
+    # For command line usage: python manual_orchestration_workflow_check.py "Your prompt here"
+    user_prompt = get_prompt_from_args() if len(sys.argv) > 1 else get_user_prompt("interactive")
+    
     print("Running full orchestration workflow...")
     result = engine.run_full_workflow(user_prompt, project_name="manual_todo_app")
 

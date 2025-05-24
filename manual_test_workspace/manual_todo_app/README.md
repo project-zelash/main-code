@@ -1,6 +1,6 @@
 # manual_todo_app
 
-Build a simple to-do app with backend and frontend using FastAPI and React.
+Create a proper landing page for a indian sweet shop
 
 ## Project Structure
 
