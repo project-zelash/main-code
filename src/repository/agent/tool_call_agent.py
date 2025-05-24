@@ -95,10 +95,18 @@ class ToolCallAgent(BaseAgent):
                     logger.info(f"🔄 Iteration {self.current_iteration}/{self.max_iterations}")
                 messages = self._prepare_messages()
                 tools_for_llm = self._prepare_tools() if self.tools else None
-                logger.info(f"[LLM CALL] Agent: {self.name}, Iteration: {self.current_iteration}, Prompt: {messages}, Tools: {tools_for_llm}")
+                
+                # Only log LLM calls in verbose mode and reduce clutter
+                if self.verbose:
+                    logger.debug(f"[LLM CALL] Agent: {self.name}, Iteration: {self.current_iteration}")
+                
                 try:
                     response = self.llm.chat(messages, tools=tools_for_llm)
-                    logger.info(f"[LLM RESPONSE] Agent: {self.name}, Iteration: {self.current_iteration}, Response: {response}")
+                    
+                    # Only log responses in debug mode to reduce clutter
+                    if self.verbose:
+                        logger.debug(f"[LLM RESPONSE] Agent: {self.name}, Iteration: {self.current_iteration}")
+                    
                     content = response.get('content', '')
                     # Output validation for codegen tasks
                     if not self._is_valid_codegen_response(content):
@@ -109,12 +117,11 @@ class ToolCallAgent(BaseAgent):
                             retries += 1
                             continue
                         else:
-                            logger.error(f"[LLM MANUAL INTERVENTION REQUIRED] Agent: {self.name}, Iteration: {self.current_iteration}, Output: {content}")
+                            logger.error(f"[LLM MANUAL INTERVENTION REQUIRED] Agent: {self.name} failed to return valid output")
                             final_response = {
                                 "error_type": "ManualInterventionRequired",
                                 "error_message": "LLM failed to return valid codegen output after retries.",
-                                "llm_output": content,
-                                "prompt": messages
+                                "llm_output": content[:500] + "..." if len(content) > 500 else content
                             }
                             break
                     # Extract tool code block if present

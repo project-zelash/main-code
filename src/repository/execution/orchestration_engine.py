@@ -85,6 +85,16 @@ class OrchestrationEngine:
         if not init_result.get("success"):
             return init_result
 
+        # Set up external project directory before generating code
+        try:
+            project_output_dir = self.codegen.set_project_output_directory(self.project_manager.project_name)
+            print(f"🎯 Project will be generated at: {project_output_dir}")
+        except Exception as e:
+            return {
+                "success": False, 
+                "message": f"Failed to create project directory: {str(e)}"
+            }
+
         self.progress_tracker.update_progress("Planning project...", 20)
         plan = self.meta_planner.decompose_project(project_description)
         if not plan or not isinstance(plan, dict):
@@ -96,11 +106,12 @@ class OrchestrationEngine:
             self.project_manager.project_name,
             self.project_manager.project_description
         )
-        codegen_result = self.codegen.execute_agent_flow_generation()
+        codegen_result = self.codegen.execute_agent_flow_generation(self.project_manager.project_name)
 
         return {
             "success": codegen_result.get("success", False),
             "project_name": self.project_manager.project_name,
+            "project_output_directory": project_output_dir,
             "plan": plan,
             "agent_flow_tasks": agent_flow_tasks,
             "codegen_result": codegen_result
