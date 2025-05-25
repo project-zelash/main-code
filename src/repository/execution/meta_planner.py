@@ -1,9 +1,13 @@
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 import json
 import uuid
 import re
+import logging
 
 from src.service.llm_factory import LLMFactory
+
+# Configure logging for this module
+logging.basicConfig(level=logging.INFO)
 
 class MetaPlanner:
     """
@@ -334,3 +338,67 @@ class MetaPlanner:
             })
         
         return fix_tasks
+    
+    def generate_detailed_plan(self, initial_plan: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate a deeply detailed technical plan from an initial plan dict.
+        
+        This method logs its progress, builds a clear LLM prompt, and robustly parses
+        the JSON response, falling back gracefully with logs if parsing fails.
+        
+        Args:
+            initial_plan: The high-level plan as a dictionary.
+        Returns:
+            A detailed plan dict containing keys: components, architecture, tech_stack, tasks.
+        """
+        logging.info("Starting detailed plan generation from initial plan")
+        
+        # Build prompt for detailed decomposition
+        prompt = (
+             "You are a seasoned system architect. "
+             f"Here is the initial plan:\n{json.dumps(initial_plan, indent=2)}\n"
+             "Transform it into a comprehensive technical plan with the following depth of detail:\n"
+             "1. Breakdown components into subcomponents with IDs and descriptions.\n"
+             "2. Define a task hierarchy, each with depth level, unique ID, description, and assigned agent layer.\n"
+             "3. Specify precise execution steps, required resources, and estimated timeframes.\n"
+             "4. Outline clear dependencies between tasks and sub-tasks.\n"
+             "5. Include technology stack considerations for each task.\n"
+             "Respond only with valid JSON, formatted as an object with keys: components, architecture, tech_stack, tasks."
+         )
+ 
+        # Request detailed plan from LLM
+        response = self.llm.chat([{"role": "user", "content": prompt}])
+        content = response.get("content", "").strip()
+        
+        logging.debug("LLM response content: %s", content)
+ 
+        # Extract and parse JSON from response
+        detailed_plan = None
+        try:
+            detailed_plan = json.loads(content)
+        except json.JSONDecodeError:
+            # Try to extract code block
+            match = re.search(r'```(?:json)?\s*({[\s\S]*?})\s*```', content)
+            if match:
+                try:
+                    detailed_plan = json.loads(match.group(1))
+                except json.JSONDecodeError as e:
+                    logging.warning("Failed to parse JSON block: %s", e)
+            else:
+                logging.warning("No JSON block found in LLM response.")
+        if not isinstance(detailed_plan, dict):
+            logging.error("Falling back: returning initial structure without tasks.")
+            detailed_plan = {
+                "components": initial_plan.get("components", []),
+                "architecture": initial_plan.get("architecture", {}),
+                "tech_stack": initial_plan.get("tech_stack", {}),
+                "tasks": []
+            }
+ 
+        # Ensure each task has a unique ID
+        for task in detailed_plan.get("tasks", []):
+            if not task.get("id"):
+                task["id"] = str(uuid.uuid4())
+        logging.info("Detailed plan generation complete with %d tasks", len(detailed_plan.get("tasks", [])))
+ 
+        return detailed_plan
