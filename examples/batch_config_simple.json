@@ -1,0 +1,21 @@
+{
+  "workflows": [
+    {
+      "prompt": "Create a simple React counter app with increment/decrement buttons",
+      "project_type": "react",
+      "test_scenarios": [
+        "Test counter displays initial value",
+        "Test increment button increases counter",
+        "Test decrement button decreases counter"
+      ]
+    },
+    {
+      "prompt": "Create a basic Python Flask hello world API",
+      "project_type": "flask",
+      "test_scenarios": [
+        "Test API responds to GET requests",
+        "Test hello world endpoint returns text"
+      ]
+    }
+  ]
+}

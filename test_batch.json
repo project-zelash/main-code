@@ -1,0 +1,31 @@
+{
+  "workflows": [
+    {
+      "prompt": "Create a React todo app with TypeScript",
+      "project_type": "react",
+      "test_scenarios": [
+        "Test adding a new todo item",
+        "Test marking todo as complete",
+        "Test deleting a todo item"
+      ]
+    },
+    {
+      "prompt": "Create a simple Python Flask API for user management",
+      "project_type": "flask",
+      "test_scenarios": [
+        "Test API endpoints are accessible",
+        "Test user creation endpoint",
+        "Test user listing endpoint"
+      ]
+    },
+    {
+      "prompt": "Create a Next.js landing page with dark mode",
+      "project_type": "nextjs",
+      "test_scenarios": [
+        "Test page loads correctly",
+        "Test dark mode toggle",
+        "Test responsive design"
+      ]
+    }
+  ]
+}

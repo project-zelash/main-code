@@ -1,0 +1,82 @@
+{
+  "workflows": [
+    {
+      "prompt": "Create a modern React todo application with TypeScript, featuring add/edit/delete functionality, local storage persistence, and a clean Material-UI design",
+      "project_type": "react",
+      "test_scenarios": [
+        "Test homepage loads and displays correctly",
+        "Test adding a new todo item works",
+        "Test marking todo as complete/incomplete",
+        "Test editing existing todo items",
+        "Test deleting todo items",
+        "Test local storage persistence",
+        "Test responsive design on mobile viewport"
+      ]
+    },
+    {
+      "prompt": "Create a Python Flask REST API for user management with endpoints for CRUD operations, JWT authentication, and SQLite database integration",
+      "project_type": "flask",
+      "test_scenarios": [
+        "Test API server starts successfully",
+        "Test health check endpoint responds",
+        "Test user registration endpoint",
+        "Test user login and JWT token generation",
+        "Test protected endpoints require authentication",
+        "Test user listing endpoint returns JSON",
+        "Test user update and delete operations"
+      ]
+    },
+    {
+      "prompt": "Create a Next.js landing page for a tech startup with dark/light mode toggle, responsive design, hero section, features section, and contact form",
+      "project_type": "nextjs",
+      "test_scenarios": [
+        "Test page loads without errors",
+        "Test dark/light mode toggle functionality",
+        "Test hero section displays correctly",
+        "Test features section is visible",
+        "Test contact form accepts input",
+        "Test responsive design breakpoints",
+        "Test navigation menu on mobile"
+      ]
+    },
+    {
+      "prompt": "Create a Vue.js dashboard application with charts, data tables, user authentication, and real-time data updates using Socket.io",
+      "project_type": "vue",
+      "test_scenarios": [
+        "Test dashboard loads with all components",
+        "Test login form functionality",
+        "Test charts render correctly",
+        "Test data tables display data",
+        "Test navigation between dashboard sections",
+        "Test responsive layout on tablets",
+        "Test user profile section"
+      ]
+    },
+    {
+      "prompt": "Create a Django web application for a blog with user authentication, post creation/editing, comments system, and admin panel",
+      "project_type": "django",
+      "test_scenarios": [
+        "Test Django server starts successfully",
+        "Test homepage displays blog posts",
+        "Test user registration and login",
+        "Test authenticated user can create posts",
+        "Test commenting system works",
+        "Test admin panel is accessible",
+        "Test post editing and deletion"
+      ]
+    },
+    {
+      "prompt": "Create a simple static HTML/CSS/JS portfolio website with smooth scrolling, contact form, project gallery, and animated sections",
+      "project_type": "static",
+      "test_scenarios": [
+        "Test website loads completely",
+        "Test smooth scrolling navigation",
+        "Test project gallery displays images",
+        "Test contact form validation",
+        "Test animated sections trigger on scroll",
+        "Test mobile responsiveness",
+        "Test loading performance"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "components": {
+    "AutomationWorkflow": true,
+    "ProjectGenerator": true,
+    "DeploymentManager": true,
+    "BrowserTestingManager": true,
+    "LLMFactory": true,
+    "ToolService": true,
+    "OrchestrationEngine": true,
+    "CLI": true
+  },
+  "files": {
+    "Main CLI": true,
+    "AutomationWorkflow": true,
+    "ProjectGenerator": true,
+    "DeploymentManager": true,
+    "BrowserTestingManager": true,
+    "Documentation": true,
+    "Demo Script": true,
+    "Simple Config": true,
+    "Integration Tests": true,
+    "examples/batch_config_simple.json": true,
+    "examples/batch_config_comprehensive.json": true,
+    "config/automation_config.json": true
+  },
+  "dependencies": {},
+  "overall": "operational"
+}

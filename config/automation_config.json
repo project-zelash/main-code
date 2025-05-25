@@ -1,0 +1,83 @@
+{
+  "_comment": "Configuration file for the Complete Automation Workflow System",
+  "system": {
+    "workspace_root": "./automation_workspace",
+    "reports_directory": "./automation_reports", 
+    "logs_directory": "./logs",
+    "cleanup_on_shutdown": true,
+    "max_concurrent_workflows": 3
+  },
+  
+  "project_generation": {
+    "default_timeout": 300,
+    "max_retries": 3,
+    "supported_project_types": [
+      "react", "vue", "angular", "nextjs", "svelte",
+      "django", "flask", "fastapi", "express",
+      "static", "go", "java", "rust", "python"
+    ],
+    "analysis": {
+      "detect_frameworks": true,
+      "check_dependencies": true,
+      "validate_structure": true
+    }
+  },
+  
+  "deployment": {
+    "default_timeout": 600,
+    "port_range": {
+      "start": 3000,
+      "end": 8000
+    },
+    "health_check": {
+      "timeout": 30,
+      "interval": 2,
+      "max_attempts": 15
+    },
+    "auto_install_dependencies": true,
+    "build_before_deploy": true
+  },
+  
+  "browser_testing": {
+    "default_timeout": 60000,
+    "headless": true,
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "mobile_viewport": {
+      "width": 375,
+      "height": 667
+    },
+    "screenshot_on_failure": true,
+    "mcp_server": {
+      "enabled": true,
+      "fallback_to_playwright": true,
+      "timeout": 30000
+    },
+    "test_suites": {
+      "connectivity": true,
+      "ui_basic": true,
+      "functionality": true,
+      "responsive": true,
+      "performance": false
+    }
+  },
+  
+  "reporting": {
+    "generate_html_reports": true,
+    "include_screenshots": true,
+    "include_logs": true,
+    "compress_reports": false,
+    "retention_days": 30
+  },
+  
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file_logging": true,
+    "console_logging": true,
+    "max_file_size": "10MB",
+    "backup_count": 5
+  }
+}
