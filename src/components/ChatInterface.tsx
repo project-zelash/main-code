@@ -53,7 +53,7 @@ Your primary goal is to help the user clarify their vision and develop an action
 
 const productStrategistPersona: AIPersona = {
   id: 'product-strategist',
-  name: 'Product Strategist',
+  name: 'Alchemist',
   description: 'Helps you refine product ideas into actionable plans.',
   icon: <Lightbulb size={16} />,
   color: 'bg-blue-500',
@@ -79,7 +79,7 @@ const availablePersonas: AIPersona[] = [
 const initialMessages: Message[] = [
   {
     id: 'welcome-1',
-    content: `Welcome to Zelash! I'm your Product Strategist. To begin, please describe the product idea you'd like to develop.`,
+    content: `Welcome to Zelash! I'm your Alchemist who would make your dreams come alive for sure!. To begin, please describe the product idea you'd like to develop.`,
     role: 'assistant',
     timestamp: new Date().toISOString(),
     emotion: 'happy'
@@ -103,7 +103,8 @@ type ChatPhase =
   | 'awaiting_plan_feedback' // Changed from presenting_plan, initial plan is shown, user can accept or request changes
   | 'revising_plan' 
   | 'plan_finalized' 
-  | 'error_state';
+  | 'error_state'
+  | 'fetching_detailed_plan';
 
 const ChatInterfaceComponent: React.FC<ChatInterfaceProps> = () => {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
