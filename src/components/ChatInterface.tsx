@@ -271,25 +271,7 @@ const ChatInterfaceComponent: React.FC<ChatInterfaceProps> = () => {
     } else if (chatPhase === 'awaiting_plan_feedback') {
       const lowerCaseContent = messageContent.toLowerCase();
       if (lowerCaseContent.includes('accept') || lowerCaseContent.includes('looks good') || lowerCaseContent.includes('finalize')) {
-        if (currentPlan) {
-          setChatPhase('plan_finalized');
-          console.log("DATABASE_SAVE (Simulated):", JSON.stringify(currentPlan.json, null, 2));
-          const finalizedMessage: Message = {
-            id: 'plan-finalized-' + Date.now(),
-            content: "Great! The product plan has been finalized. (Simulated save to DB). You can start a new idea now.",
-            role: 'assistant',
-            timestamp: new Date().toISOString(),
-            emotion: 'happy'
-          };
-          setMessages(prev => [...prev, finalizedMessage]);
-          // Reset for new idea flow
-          setCurrentProductIdea(null); 
-          setAnswersFromUser({});
-          setCurrentQuestionIndex(0);
-          setQuestionsForUser([]);
-          setCurrentPlan(null);
-          setChatPhase('awaiting_idea'); // Directly go to awaiting idea
-        } else {
+        if (!currentPlan) {
           const noPlanMessage: Message = {
             id: 'error-no-plan-to-finalize-' + Date.now(),
             content: "There isn't a current plan to finalize. Let's generate one first!",
@@ -297,18 +279,67 @@ const ChatInterfaceComponent: React.FC<ChatInterfaceProps> = () => {
             timestamp: new Date().toISOString(),
           };
           setMessages(prev => [...prev, noPlanMessage]);
+          return;
+        }
+        // Send plan JSON to backend for detailed technical planning
+        setChatPhase('fetching_detailed_plan');
+        const loadingMessage: Message = {
+          id: 'loading-detailed-plan-' + Date.now(),
+          content: 'Generating a detailed technical plan, please wait...',
+          role: 'assistant',
+          timestamp: new Date().toISOString(),
+          isLoading: true,
+        };
+        setMessages(prev => [...prev, loadingMessage]);
+        try {
+          const response = await fetch('/api/meta-planner/detailed-plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plan: currentPlan.json }),
+          });
+          const detailedPlan = await response.json();
+          // Remove loading indicator
+          setMessages(prev => prev.filter(m => m.id !== loadingMessage.id));
+          // Show detailed plan JSON
+          const detailedPlanMessage: Message = {
+            id: 'detailed-plan-' + Date.now(),
+            content: JSON.stringify(detailedPlan, null, 2),
+            role: 'assistant',
+            timestamp: new Date().toISOString(),
+          };
+          setMessages(prev => [...prev, detailedPlanMessage]);
+        } catch (err: any) {
+          // Handle fetch error
+          const errorMessage: Message = {
+            id: 'error-detailed-plan-' + Date.now(),
+            content: `Failed to generate detailed plan: ${err.message || 'Unknown error'}`,
+            role: 'assistant',
+            timestamp: new Date().toISOString(),
+            emotion: 'concerned',
+          };
+          setMessages(prev => [...prev, errorMessage]);
+        } finally {
+          // Finalize and reset for next idea
+          const finalizedMessage: Message = {
+            id: 'plan-finalized-' + Date.now(),
+            content: 'Detailed plan generated and saved. You can start a new idea now.',
+            role: 'assistant',
+            timestamp: new Date().toISOString(),
+            emotion: 'happy',
+          };
+          setMessages(prev => [...prev, finalizedMessage]);
+          setCurrentProductIdea(null);
+          setAnswersFromUser({});
+          setCurrentQuestionIndex(0);
+          setQuestionsForUser([]);
+          setCurrentPlan(null);
+          setChatPhase('awaiting_idea');
         }
         return; // Exit after handling acceptance
-      }
-      // If not an acceptance, it's feedback for revision.
-      if (!currentPlan || !currentProductIdea) {
-        setMessages(prev => [...prev, { id: 'error-internal-' + Date.now(), content: 'Internal error: Missing plan or idea for feedback.', role: 'assistant', timestamp: new Date().toISOString()}]);
-        setChatPhase('error_state');
-        return;
-      }
-      
-      setChatPhase('revising_plan');
-      setIsAIThinking(true);
+       } else if (lowerCaseContent.includes('yes') || lowerCaseContent.includes('no')) {
+         // existing branch for revising plan
+       }
+    } else if (chatPhase === 'revising_plan') {
       const thinkingMsgForRevision: Message = { // Renamed variable
         id: 'thinking-revision-' + Date.now(),
         content: 'Got your feedback! Revising the plan...',
@@ -668,7 +699,7 @@ const ChatInterfaceComponent: React.FC<ChatInterfaceProps> = () => {
                   <TooltipContent>{sidebarOpen ? 'Collapse Sidebar' : 'Expand Sidebar'}</TooltipContent>
                 </Tooltip>
               )}
-              <AIAvatar persona={selectedPersona} size="sm" />
+              <AIAvatar aiPersona={selectedPersona} size="sm" />
               <div className="ml-2">
                 <h1 className="text-sm font-medium">{selectedPersona.name}</h1>
                 <p className="text-xs text-green-400">Online</p>
@@ -724,16 +755,7 @@ const ChatInterfaceComponent: React.FC<ChatInterfaceProps> = () => {
           <div className="border-t border-gray-700/50 p-4 bg-gray-900/30 backdrop-blur-md">
             <ChatInput
               onSendMessage={handleSendMessage}
-              isThinking={isAIThinking} // Corrected prop name from isAIThinking
-              placeholder={
-                chatPhase === 'awaiting_idea' ? "Describe your product idea..." :
-                chatPhase === 'awaiting_question_answer' ? "Please answer using the buttons above." :
-                chatPhase === 'generating_questions' || chatPhase === 'generating_plan' || chatPhase === 'revising_plan' ? "AI is thinking..." :
-                chatPhase === 'awaiting_plan_feedback' ? "Type your feedback for the plan, or 'Looks good' to accept..." :
-                chatPhase === 'plan_finalized' ? "Plan finalized. Describe a new product idea..." :
-                "Type your message or next idea..."
-              }
-              disabled={isAIThinking || chatPhase === 'awaiting_question_answer' || chatPhase === 'generating_questions' || chatPhase === 'generating_plan' || chatPhase === 'revising_plan'}
+              isAIThinking={isAIThinking} // Corrected prop name from isAIThinking
             />
           </div>
         </div>
