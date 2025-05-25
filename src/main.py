@@ -2,9 +2,19 @@ import os
 import sys
 import argparse
 from dotenv import load_dotenv
+import atexit
+import logging
+from pathlib import Path
 
-# Load environment variables
-load_dotenv()
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Load environment variables from .env file at the project root
+# Assuming main.py is in src/, so .env is one level up from main.py's directory's parent
+# More robustly, ZELASH_PROJECT_ROOT could be set, or we can infer.
+project_root = Path(__file__).resolve().parent.parent 
+load_dotenv(dotenv_path=project_root / ".env")
 
 # FastAPI imports
 import uvicorn
@@ -20,6 +30,48 @@ from src.service.tool_service import ToolService
 from src.repository.deployment.cli import CLI
 from src.repository.deployment.web_ui import WebUI
 
+# Import the server manager
+from src.utils.browser_automation_server_manager import BrowserAutomationServerManager # Added
+from typing import Optional # Added
+
+# Global instance of the server manager
+# It will use os.environ if no specific config object is passed, which is fine here.
+browser_server_manager: Optional[BrowserAutomationServerManager] = None # Added
+
+
+def initialize_browser_automation_server_manager(): # Added
+    global browser_server_manager # Added
+    # Pass os.environ (or a wrapper) if BrowserAutomationServerManager expects a config object
+    # For now, assuming BrowserAutomationServerManager can directly use os.environ if no config is passed
+    # or uses a default SimpleConfigProvider as implemented.
+    # Set ZELASH_PROJECT_ROOT if not already set, for the manager to use
+    if "ZELASH_PROJECT_ROOT" not in os.environ:
+        os.environ["ZELASH_PROJECT_ROOT"] = str(project_root)
+    
+    browser_server_manager = BrowserAutomationServerManager() # Instantiated
+    if browser_server_manager.enabled: # Added
+        logger.info("Browser Automation Server is enabled. Attempting to start...") # Added
+        if browser_server_manager.start_server(): # Added
+            logger.info("Browser Automation Server started successfully by manager.") # Added
+        else: # Added
+            logger.error("Browser Automation Server failed to start via manager. Check logs.") # Added
+    else: # Added
+        logger.info("Browser Automation Server is disabled in configuration. Will not be started.") # Added
+
+def shutdown_browser_automation_server(): # Added
+    global browser_server_manager # Added
+    if browser_server_manager and browser_server_manager.is_running(): # Added
+        logger.info("Attempting to stop Browser Automation Server via manager...") # Added
+        browser_server_manager.stop_server() # Added
+        logger.info("Browser Automation Server stop command issued via manager.") # Added
+    elif browser_server_manager and browser_server_manager.enabled:
+        logger.warning("Browser Automation Server was enabled but not running at shutdown. No stop action needed.")
+    else:
+        logger.info("Browser Automation Server was not running or not enabled. No stop action needed.")
+
+# Register the shutdown function with atexit for all modes
+atexit.register(shutdown_browser_automation_server) # Added
+
 def create_app():
     """
     Create and configure the FastAPI application with all services.
@@ -33,6 +85,18 @@ def create_app():
         description="A fully Python-based, AI-powered developer assistant.",
         version="0.1.0"
     )
+
+    # FastAPI event handlers for API mode
+    @app.on_event("startup")
+    async def startup_event():
+        logger.info("FastAPI app startup: Initializing Browser Automation Server Manager...")
+        initialize_browser_automation_server_manager() # Use the new manager
+
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        # atexit will handle the shutdown, but we can log here too.
+        logger.info("FastAPI app shutdown: Browser Automation Server will be stopped by atexit handler.")
+        # shutdown_browser_automation_server() # atexit handles this
     
     # Initialize services
     llm_config = {
@@ -101,23 +165,61 @@ def main():
     parser.add_argument("--share", action="store_true", help="Share Web UI with public link")
     
     args = parser.parse_args()
+
+    # Initialize and start the browser automation server manager early 
+    # if not in API mode (where FastAPI startup handles it).
+    # For CLI and Web modes, we start it here and rely on atexit for shutdown.
+    if args.mode != "api":
+        logger.info(f"{args.mode.upper()} mode: Initializing Browser Automation Server Manager...")
+        initialize_browser_automation_server_manager()
     
     if args.mode == "api":
         # Run FastAPI server
+        # Browser server is started by FastAPI startup event
         app, _, _, _ = create_app()
         uvicorn.run(app, host=args.host, port=args.port)
     
     elif args.mode == "cli":
         # Run CLI mode
+        # Browser server started above, atexit handles shutdown
         cli = CLI()
-        sys.exit(cli.run(args.cli_args))
+        # Ensure sys.exit is called to trigger atexit handlers properly
+        try:
+            exit_code = cli.run(args.cli_args)
+            if exit_code is None: # Handle cases where cli.run might not return an int
+                exit_code = 0 
+        except SystemExit as e:
+            exit_code = e.code if e.code is not None else 0
+        except Exception as e:
+            logger.error(f"Unhandled exception in CLI mode: {e}", exc_info=True)
+            exit_code = 1
+        finally:
+            sys.exit(exit_code)
     
     elif args.mode == "web":
         # Run Web UI mode
-        _, agent_service, tool_service, _ = create_app()
+        # Browser server started above, atexit handles shutdown
+        # Create app context but don't run uvicorn; web_ui.run handles its own server if any.
+        _, agent_service, tool_service, orchestration_engine_instance = create_app()
         web_ui = WebUI()
-        web_ui.load_tools(tool_service.tools)
-        web_ui.launch_ui(share=args.share)
+        # WebUI().run() might block, ensure atexit is robust
+        # If WebUI().run() is a blocking call that doesn't allow atexit to run cleanly on Ctrl+C,
+        # we might need to handle signals for graceful shutdown.
+        # For now, assume it exits cleanly or atexit is sufficient.
+        try:
+            web_ui.run(agent_service=agent_service, tool_service=tool_service, orchestration_engine=orchestration_engine_instance, share=args.share)
+            exit_code = 0
+        except KeyboardInterrupt:
+            logger.info("Web UI interrupted. Exiting...")
+            exit_code = 0
+        except SystemExit as e: # Catch sys.exit from underlying Gradio/WebUI
+            exit_code = e.code if e.code is not None else 0
+        except Exception as e:
+            logger.error(f"Unhandled exception in Web UI mode: {e}", exc_info=True)
+            exit_code = 1
+        finally:
+            # atexit will handle server shutdown
+            sys.exit(exit_code)
 
 if __name__ == "__main__":
     main()

@@ -37,21 +37,35 @@ logger = logging.getLogger(__name__)
 class BrowserTestingManager:
     """Handles automated browser testing of web applications."""
     
-    def __init__(self, use_mcp: bool = True, headless: bool = False):
+    DEFAULT_MCP_RETRY_ATTEMPTS = 3
+    DEFAULT_MCP_RETRY_DELAY_SECONDS = 5
+    
+    def __init__(self, use_mcp: bool = True, headless: bool = False,
+                 mcp_retry_attempts: int = DEFAULT_MCP_RETRY_ATTEMPTS,
+                 mcp_retry_delay_seconds: int = DEFAULT_MCP_RETRY_DELAY_SECONDS):
         """
         Initialize the browser testing manager.
         
         Args:
             use_mcp: Whether to use MCP browser-use system
             headless: Whether to run browsers in headless mode
+            mcp_retry_attempts: Number of attempts for MCP tasks
+            mcp_retry_delay_seconds: Delay between MCP task retries
         """
         self.use_mcp = use_mcp and MCP_AVAILABLE
         self.headless = headless
         self.test_results = []
         self.active_sessions = {}
+        self.mcp_retry_attempts = mcp_retry_attempts
+        self.mcp_retry_delay_seconds = mcp_retry_delay_seconds
         
-        if not self.use_mcp and not PLAYWRIGHT_AVAILABLE:
-            raise ImportError("Neither MCP browser-use nor Playwright is available")
+        if self.use_mcp:
+            logger.info(f"BrowserTestingManager initialized to use MCP browser-use system with {self.mcp_retry_attempts} retries and {self.mcp_retry_delay_seconds}s delay.")
+        elif PLAYWRIGHT_AVAILABLE:
+            logger.info("BrowserTestingManager initialized to use Playwright as MCP is not available or not selected.")
+        else:
+            logger.error("BrowserTestingManager initialization failed: Neither MCP nor Playwright is available.")
+            raise ImportError("Neither MCP browser-use nor Playwright is available for BrowserTestingManager.")
     
     async def test_application(
         self, 
@@ -209,41 +223,81 @@ class BrowserTestingManager:
             logger.info(f"🎯 Running scenario: {scenario_name}")
             
             # Run the task using MCP browser agent
-            result = self._run_mcp_task(full_task)
+            mcp_result_output, mcp_execution_successful = self._run_mcp_task(full_task)
             
             return {
                 "test_name": scenario_name,
                 "task": task_description,
-                "success": "error" not in result.lower() and "failed" not in result.lower(),
-                "result": result
+                "success": mcp_execution_successful, # Reflects if MCP task ran without internal error strings
+                "result": mcp_result_output # Full output from MCP agent
             }
             
         except Exception as e:
-            logger.error(f"MCP scenario failed: {str(e)}")
+            logger.error(f"MCP scenario failed due to Python exception: {str(e)}")
             return {
                 "test_name": scenario.get("name", "unknown"),
                 "success": False,
-                "error": str(e)
+                "error": f"Python exception during scenario execution: {str(e)}",
+                "result": None
             }
     
-    def _run_mcp_task(self, task: str) -> str:
-        """Run a single task using MCP browser agent."""
-        try:
-            if not MCP_AVAILABLE:
-                return "MCP browser system not available"
+    def _run_mcp_task(self, task: str) -> Tuple[str, bool]:
+        """
+        Run a single task using MCP browser agent with retries.
+        Returns a tuple: (result_string, execution_successful_flag)
+        The flag is True if the task executed and didn't return a clear MCP-side error message.
+        The result_string contains the actual output from the MCP agent.
+        """
+        if not MCP_AVAILABLE:
+            logger.warning("MCP browser system not available. Cannot run MCP task.")
+            return "Error: MCP browser system not available", False
+
+        last_exception_or_mcp_error = "No attempts made"
+        for attempt in range(self.mcp_retry_attempts):
+            logger.info(f"Attempt {attempt + 1} of {self.mcp_retry_attempts} to run MCP task: {task[:150]}...")
+            try:
+                result = run_browser_task(
+                    task=task,
+                    headless=self.headless,
+                    use_vision=True 
+                )
+                
+                # Stricter check for MCP-reported operational failures
+                # Common error indicators from the MCP task's string result
+                mcp_error_indicators = [
+                    "error:", "failed to", "unable to", "could not", "exception:",
+                    "timeout", "cannot perform", "mcp task execution error" 
+                ]
+
+                is_mcp_reported_error = False
+                if isinstance(result, str):
+                    result_lower = result.lower()
+                    for indicator in mcp_error_indicators:
+                        if indicator in result_lower:
+                            is_mcp_reported_error = True
+                            break
+                
+                if is_mcp_reported_error:
+                    logger.warning(f"MCP task on attempt {attempt + 1} returned an operational error: {result}")
+                    last_exception_or_mcp_error = f"MCP operational error: {result}"
+                    if attempt == self.mcp_retry_attempts - 1:
+                        return result, False # Return the error message from MCP, flag as not successful
+                    # Continue to retry for MCP operational errors
+                else:
+                    logger.info(f"MCP task successful on attempt {attempt + 1}.")
+                    return result, True # Success, MCP task ran and didn't report a clear error
+
+            except Exception as e:
+                last_exception_or_mcp_error = f"Python exception: {str(e)}"
+                logger.warning(f"MCP task attempt {attempt + 1} failed with Python exception: {str(e)}")
             
-            # Use the MCP browser helper
-            result = run_browser_task(
-                task=task,
-                headless=self.headless,
-                use_vision=True
-            )
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"MCP task failed: {str(e)}")
-            return f"Error: {str(e)}"
+            if attempt < self.mcp_retry_attempts - 1:
+                logger.info(f"Retrying in {self.mcp_retry_delay_seconds} seconds...")
+                time.sleep(self.mcp_retry_delay_seconds)
+            else:
+                logger.error(f"All {self.mcp_retry_attempts} MCP task attempts failed for task: {task[:150]}. Last error: {last_exception_or_mcp_error}")
+        
+        return f"Error: All {self.mcp_retry_attempts} attempts to run MCP task failed. Last recorded issue: {last_exception_or_mcp_error}", False
     
     async def _run_playwright_ui_tests(
         self, 

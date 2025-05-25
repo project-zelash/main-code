@@ -1,324 +1,214 @@
 """
 Browser-Use MCP Helper Functions
 
-This module provides helper functions to use the browser-use MCP server
-for browser automation tasks, similar to the previous helper functions
-but with the advantages of the MCP implementation.
+This module provides helper functions to act as a client to a running
+MCP browser-use server for browser automation tasks.
 """
 
 import os
-import sys
 import json
-import subprocess
-import asyncio
+import requests # Ensure 'requests' is in the main requirements.txt
 import logging
-from typing import Dict, Any, List, Optional, Union
-from pathlib import Path
+from typing import Dict, Any, Optional # Simplified imports
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
-# Add the MCP browser-use to the Python path
-REPO_ROOT = Path(__file__).parents[3]  # main-code directory
-MCP_PATH = REPO_ROOT / "integrations" / "mcp-browser-use"
-BROWSER_USE_PATH = REPO_ROOT / "integrations" / "browser-use"
+# Configuration for the MCP server connection will now be primarily managed
+# by the Zelash application's central configuration, which should provide
+# the server URL to these functions or the classes that use them.
+# For direct use or testing, environment variables can still be a fallback.
 
-sys.path.append(str(MCP_PATH))
-sys.path.append(str(BROWSER_USE_PATH))
+# ZELASH_BROWSER_AUTOMATION_SERVER_URL will be the primary source.
+# Example: "http://127.0.0.1:8777" (note: no /mcp path by default for uvicorn)
+DEFAULT_MCP_SERVER_URL = "http://127.0.0.1:8777"
+MCP_SERVER_URL = os.getenv("ZELASH_BROWSER_AUTOMATION_SERVER_URL", DEFAULT_MCP_SERVER_URL)
 
-# Store task state
-_TASK_STATE = {
-    "current_task": None,
-    "current_process": None,
-    "logs": [],
-}
+# Timeout for requests to the MCP server (in seconds)
+DEFAULT_MCP_REQUEST_TIMEOUT = 300.0 # 5 minutes
+MCP_REQUEST_TIMEOUT = float(os.getenv("ZELASH_MCP_CLIENT_REQUEST_TIMEOUT", str(DEFAULT_MCP_REQUEST_TIMEOUT)))
+
+# API Key for MCP server if it's configured to use one.
+# The mcp-browser-use server itself doesn't have this, but a gateway might.
+MCP_API_KEY = os.getenv("ZELASH_MCP_SERVER_API_KEY_FOR_CLIENT")
+
+
+def _get_mcp_server_url():
+    """Gets the MCP server URL, prioritizing Zelash config."""
+    # In a full integration, this would ideally come from a shared config module
+    # or be passed into the functions/classes that use these helpers.
+    return os.getenv("ZELASH_BROWSER_AUTOMATION_SERVER_URL", MCP_SERVER_URL)
+
+def _get_mcp_request_timeout():
+    """Gets the MCP request timeout."""
+    return float(os.getenv("ZELASH_MCP_CLIENT_REQUEST_TIMEOUT", str(MCP_REQUEST_TIMEOUT)))
+
+def _get_mcp_api_key():
+    """Gets the API key for the MCP client if configured."""
+    return os.getenv("ZELASH_MCP_SERVER_API_KEY_FOR_CLIENT", MCP_API_KEY)
+
+
+def _send_mcp_request(method: str, params: Dict[str, Any], task_description_for_log: str) -> str:
+    """
+    Sends a JSON-RPC request to the configured MCP server.
+
+    Args:
+        method: The MCP tool name (e.g., "run_browser_agent").
+        params: A dictionary of parameters for the MCP tool.
+        task_description_for_log: A short description of the task for logging.
+
+    Returns:
+        The string result from the MCP tool, or an error message string.
+    """
+    server_url = _get_mcp_server_url()
+    request_timeout = _get_mcp_request_timeout()
+    api_key = _get_mcp_api_key()
+
+    payload = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "id": os.urandom(6).hex() # Generate a random hex id
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}" # Or other scheme if needed
+
+    logger.info(f"Sending MCP request to {server_url} for method '{method}' with task: {task_description_for_log[:100]}...")
+    logger.debug(f"MCP Request Payload: {json.dumps(payload)}")
+    logger.debug(f"MCP Request Headers: {headers}")
+
+
+    try:
+        response = requests.post(server_url, json=payload, headers=headers, timeout=request_timeout)
+        response.raise_for_status()  # Raises an HTTPError for bad responses (4XX or 5XX)
+        
+        response_data = response.json()
+        logger.debug(f"MCP Response Data: {json.dumps(response_data)}")
+
+        if "error" in response_data and response_data["error"] is not None:
+            error_info = response_data["error"]
+            error_code = error_info.get("code", "N/A")
+            error_message = error_info.get("message", "Unknown MCP error")
+            error_data = error_info.get("data", None)
+            log_msg = f"MCP server returned an error for method '{method}'. Code: {error_code}, Message: {error_message}"
+            if error_data:
+                log_msg += f", Data: {error_data}"
+            logger.error(log_msg)
+            return f"Error: MCP Server - {error_message} (Code: {error_code})"
+        
+        result = response_data.get("result")
+        
+        # The mcp-browser-use server tools (run_browser_agent, run_deep_research)
+        # are expected to return a string.
+        if not isinstance(result, str):
+            logger.error(f"Unexpected result type or missing result from MCP server for method '{method}'. Expected string, got {type(result)}. Full response: {response_data}")
+            return "Error: Unexpected or missing result from MCP server. Expected a string. Check server logs."
+            
+        logger.info(f"MCP method '{method}' completed successfully for task: {task_description_for_log[:100]}.")
+        return result
+
+    except requests.exceptions.Timeout:
+        logger.error(f"Request to MCP server at {server_url} timed out for method '{method}' after {request_timeout} seconds. Task: {task_description_for_log[:100]}")
+        return f"Error: MCP request timed out ({request_timeout}s)."
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Failed to connect to MCP server at {server_url}. Ensure the server is running and accessible. Method: '{method}'. Task: {task_description_for_log[:100]}")
+        return f"Error: Could not connect to MCP server at {server_url}."
+    except requests.exceptions.HTTPError as e:
+        # This will catch 4xx/5xx errors after raise_for_status()
+        logger.error(f"HTTP error occurred during MCP request to {server_url} for method '{method}': {e}. Response: {e.response.text[:500] if e.response else 'No response body'}")
+        return f"Error: MCP communication failed with HTTP status {e.response.status_code if e.response else 'N/A'} - {str(e)}."
+    except requests.exceptions.RequestException as e:
+        logger.error(f"An error occurred during MCP request to {server_url} for method '{method}': {e}. Task: {task_description_for_log[:100]}")
+        return f"Error: MCP communication failed - {str(e)}."
+    except json.JSONDecodeError:
+        resp_text = response.text if 'response' in locals() else 'No response object'
+        logger.error(f"Failed to decode JSON response from MCP server at {server_url} for method '{method}'. Response text: {resp_text[:500]}. Task: {task_description_for_log[:100]}")
+        return "Error: Invalid JSON response from MCP server."
+    except Exception as e: # Catch any other unexpected errors
+        logger.error(f"An unexpected error occurred in MCP client for method '{method}' to {server_url}: {e}. Task: {task_description_for_log[:100]}", exc_info=True)
+        return f"Error: Unexpected client-side error - {str(e)}."
 
 def run_browser_task(
-    task: str, 
-    headless: bool = False,
-    use_vision: bool = True,
+    task: str,
+    # These parameters are now informational as the server primarily controls these settings.
+    # They are kept for potential future use if the MCP tool evolves to accept them as overrides.
+    headless_hint: bool = False, 
+    use_vision_hint: bool = True,
 ) -> str:
     """
-    Run a browser task using the MCP browser-use implementation.
-    
-    Args:
-        task: The natural language task to perform
-        headless: Whether to run the browser in headless mode
-        use_vision: Whether to enable vision capabilities
-        
-    Returns:
-        The task ID (can be used to reference this task later)
-    """
-    # Clear previous logs
-    _TASK_STATE["logs"] = []
-    
-    # Add initial task to logs
-    _TASK_STATE["logs"].append({
-        "role": "system",
-        "content": f"Starting task: {task}"
-    })
-    
-    # Set environment variables
-    env = os.environ.copy()
-    env["MCP_BROWSER_HEADLESS"] = str(headless).lower()
-    env["MCP_AGENT_TOOL_USE_VISION"] = str(use_vision).lower()
-    
-    # Set Google Gemini API key directly
-    env["MCP_LLM_GOOGLE_API_KEY"] = "AIzaSyDHT_4-rbBQkDD2igDxnxmu-j5LfH1MJ8I"
-    env["MCP_LLM_PROVIDER"] = "google"
-    env["MCP_LLM_MODEL_NAME"] = "gemini-2.0-flash"
-    env["MCP_LLM_TEMPERATURE"] = "0.4"
-    
-    # Configure browser settings
-    env["MCP_BROWSER_HEADLESS"] = str(headless).lower()
-    env["MCP_BROWSER_WINDOW_WIDTH"] = "1280"
-    env["MCP_BROWSER_WINDOW_HEIGHT"] = "720"
-    env["MCP_BROWSER_DISABLE_SECURITY"] = "false"
-    
-    # Configure agent tool settings
-    env["MCP_AGENT_TOOL_USE_VISION"] = str(use_vision).lower()
-    env["MCP_AGENT_TOOL_MAX_STEPS"] = "100"
-    env["MCP_AGENT_TOOL_MAX_ACTIONS_PER_STEP"] = "5"
-    env["MCP_AGENT_TOOL_TOOL_CALLING_METHOD"] = "auto"
-    
-    # Configure paths
-    deep_research_dir = REPO_ROOT / "tmp" / "deep_research"
-    deep_research_dir.mkdir(parents=True, exist_ok=True)
-    env["MCP_RESEARCH_TOOL_SAVE_DIR"] = str(deep_research_dir)
-    
-    # Configure server settings
-    env["MCP_SERVER_LOGGING_LEVEL"] = "INFO"
-    env["MCP_SERVER_ANONYMIZED_TELEMETRY"] = "true"
-    
-    # Construct the command
-    cmd = [
-        "python", "-m", "mcp_server_browser_use.cli", 
-        "run-browser-agent", task
-    ]
-    
-    # Run the command
-    try:
-        # Create a unique task ID
-        import uuid
-        task_id = str(uuid.uuid4())
-        
-        # Run the command asynchronously
-        process = subprocess.Popen(
-            cmd,
-            cwd=str(MCP_PATH / "src"),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        
-        # Store the task and process
-        _TASK_STATE["current_task"] = task_id
-        _TASK_STATE["current_process"] = process
-        
-        # Add log entry
-        _TASK_STATE["logs"].append({
-            "role": "system",
-            "content": f"Task started with ID: {task_id}"
-        })
-        
-        return task_id
-        
-    except Exception as e:
-        logger.error(f"Error running browser task: {e}")
-        # Add error to logs
-        _TASK_STATE["logs"].append({
-            "role": "system",
-            "content": f"Error: {str(e)}"
-        })
-        return f"Error: {str(e)}"
+    Run a browser task by sending a request to the MCP browser-use server.
+    The actual headless/vision mode is determined by the MCP server's configuration.
 
+    Args:
+        task: The natural language task to perform.
+        headless_hint: (Informational) Preferred mode; server configuration takes precedence.
+        use_vision_hint: (Informational) Preferred vision use; server configuration takes precedence.
+
+    Returns:
+        The string result from the MCP tool (output of the browser agent) or an error message.
+    """
+    logger.info(f"Initiating browser task via MCP: {task[:150]}... (Headless hint: {headless_hint}, Vision hint: {use_vision_hint})")
+    
+    # Parameters for 'run_browser_agent' as per mcp-browser-use README:
+    # - task (string, required)
+    # Other settings like headless, vision, LLM models are configured on the server.
+    params = {"task": task}
+    
+    # If in the future, the MCP tool 'run_browser_agent' supports overriding these via params,
+    # they could be added here, e.g.:
+    # if headless_hint is not None: params["headless_override"] = headless_hint
+    # if use_vision_hint is not None: params["use_vision_override"] = use_vision_hint
+
+    return _send_mcp_request(method="run_browser_agent", params=params, task_description_for_log=task)
 
 def run_deep_research(
     research_task: str,
-    max_parallel_browsers: int = 3,
-    save_dir: str = None,
+    max_parallel_browsers_override: Optional[int] = None,
 ) -> str:
     """
-    Run a deep research task using the MCP browser-use implementation.
-    
+    Run a deep research task by sending a request to the MCP browser-use server.
+
     Args:
-        research_task: The research topic or question
-        max_parallel_browsers: Maximum number of parallel browsers to use
-        save_dir: Directory to save research output
-        
+        research_task: The research topic or question.
+        max_parallel_browsers_override: (Optional) Override server's default for max parallel browsers.
+
     Returns:
-        The task ID (can be used to reference this task later)
+        The string result from the MCP tool (research report) or an error message.
     """
-    # Clear previous logs
-    _TASK_STATE["logs"] = []
+    logger.info(f"Initiating deep research task via MCP: {research_task[:150]}...")
     
-    # Add initial task to logs
-    _TASK_STATE["logs"].append({
-        "role": "system",
-        "content": f"Starting research: {research_task}"
-    })
+    # Parameters for 'run_deep_research' as per mcp-browser-use README:
+    # - research_task (string, required)
+    # - max_parallel_browsers (integer, optional)
+    params: Dict[str, Any] = {"research_task": research_task}
+    if max_parallel_browsers_override is not None:
+        params["max_parallel_browsers"] = max_parallel_browsers_override
+        logger.info(f"Overriding max_parallel_browsers to: {max_parallel_browsers_override}")
     
-    # Set environment variables
-    env = os.environ.copy()
-    env["MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS"] = str(max_parallel_browsers)
-    
-    if save_dir:
-        save_path = Path(save_dir)
-        save_path.mkdir(parents=True, exist_ok=True)
-        env["MCP_RESEARCH_TOOL_SAVE_DIR"] = str(save_path)
-    else:
-        # Create a default save directory
-        save_path = REPO_ROOT / "tmp" / "deep_research"
-        save_path.mkdir(parents=True, exist_ok=True)
-        env["MCP_RESEARCH_TOOL_SAVE_DIR"] = str(save_path)
-    
-    # Set Google Gemini API key directly
-    env["MCP_LLM_GOOGLE_API_KEY"] = "AIzaSyDHT_4-rbBQkDD2igDxnxmu-j5LfH1MJ8I"
-    env["MCP_LLM_PROVIDER"] = "google"
-    env["MCP_LLM_MODEL_NAME"] = "gemini-2.0-flash"
-    env["MCP_LLM_TEMPERATURE"] = "0.4"
-    
-    # Configure browser settings
-    env["MCP_BROWSER_HEADLESS"] = "false"
-    env["MCP_BROWSER_WINDOW_WIDTH"] = "1280"
-    env["MCP_BROWSER_WINDOW_HEIGHT"] = "720"
-    env["MCP_BROWSER_DISABLE_SECURITY"] = "false"
-    
-    # Configure agent tool settings
-    env["MCP_AGENT_TOOL_USE_VISION"] = "true"
-    env["MCP_AGENT_TOOL_MAX_STEPS"] = "100"
-    env["MCP_AGENT_TOOL_MAX_ACTIONS_PER_STEP"] = "5"
-    env["MCP_AGENT_TOOL_TOOL_CALLING_METHOD"] = "auto"
-    
-    # Configure server settings
-    env["MCP_SERVER_LOGGING_LEVEL"] = "INFO"
-    env["MCP_SERVER_ANONYMIZED_TELEMETRY"] = "true"
-    
-    # Construct the command
-    cmd = [
-        "python", "-m", "mcp_server_browser_use.cli", 
-        "run-deep-research", research_task,
-        "--max-parallel-browsers", str(max_parallel_browsers)
-    ]
-    
-    # Run the command
-    try:
-        # Create a unique task ID
-        import uuid
-        task_id = str(uuid.uuid4())
-        
-        # Run the command asynchronously
-        process = subprocess.Popen(
-            cmd,
-            cwd=str(MCP_PATH / "src"),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        
-        # Store the task and process
-        _TASK_STATE["current_task"] = task_id
-        _TASK_STATE["current_process"] = process
-        
-        # Add log entry
-        _TASK_STATE["logs"].append({
-            "role": "system",
-            "content": f"Research task started with ID: {task_id}"
-        })
-        
-        return task_id
-        
-    except Exception as e:
-        logger.error(f"Error running research task: {e}")
-        # Add error to logs
-        _TASK_STATE["logs"].append({
-            "role": "system",
-            "content": f"Error: {str(e)}"
-        })
-        return f"Error: {str(e)}"
+    return _send_mcp_request(method="run_deep_research", params=params, task_description_for_log=research_task)
 
-
-def stop_browser_task() -> bool:
-    """
-    Stop the currently running browser task.
-    
-    Returns:
-        True if the task was stopped successfully, False otherwise
-    """
-    if not _TASK_STATE["current_process"]:
-        logger.warning("No browser task is running.")
-        return False
-    
-    try:
-        # Terminate the process
-        _TASK_STATE["current_process"].terminate()
-        
-        # Give it a moment to clean up
-        import time
-        time.sleep(1)
-        
-        # Add log entry
-        _TASK_STATE["logs"].append({
-            "role": "system",
-            "content": "Task stopped by user"
-        })
-        
-        return True
-    except Exception as e:
-        logger.error(f"Error stopping browser task: {e}")
-        # Add error to logs
-        _TASK_STATE["logs"].append({
-            "role": "system",
-            "content": f"Error stopping task: {str(e)}"
-        })
-        return False
-
-
-def get_browser_logs() -> List[Dict[str, str]]:
-    """
-    Get the logs from the browser task.
-    
-    Returns:
-        A list of log entries
-    """
-    # If a process is running, try to capture its current output
-    if _TASK_STATE["current_process"]:
-        try:
-            # Check if there's any output to read
-            if _TASK_STATE["current_process"].stdout:
-                # Read any available output without blocking
-                import select
-                if select.select([_TASK_STATE["current_process"].stdout], [], [], 0)[0]:
-                    output = _TASK_STATE["current_process"].stdout.read()
-                    if output:
-                        _TASK_STATE["logs"].append({
-                            "role": "system",
-                            "content": output
-                        })
-        except Exception as e:
-            logger.error(f"Error reading process output: {e}")
-    
-    return _TASK_STATE["logs"]
-
+# Removed:
+# - Global REPO_ROOT, MCP_INTEGRATION_PATH, BROWSER_USE_INTEGRATION_PATH (not relevant for client)
+# - sys.path.append calls (not relevant for client)
+# - stop_browser_task() and get_browser_logs() (not applicable to synchronous MCP client model)
+# - Hardcoded API key (now uses _get_mcp_api_key() which checks env var)
 
 if __name__ == "__main__":
-    # Example usage
-    task_id = run_browser_task("Go to google.com and search for 'browser-use MCP'")
-    print(f"Task started with ID: {task_id}")
+    # Configure basic logging for example run
+    logging.basicConfig(
+        level=logging.DEBUG, # Use DEBUG to see detailed MCP request/response
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
     
-    # Wait a bit
-    import time
-    time.sleep(30)
+    # Ensure ZELASH_BROWSER_AUTOMATION_SERVER_URL is set in your environment
+    # to point to the running mcp-browser-use server, e.g., http://127.0.0.1:8777
+    # You can also set ZELASH_MCP_CLIENT_REQUEST_TIMEOUT if needed.
     
-    # Stop the task
-    stop_browser_task()
-    
-    # Get the logs
-    logs = get_browser_logs()
-    print(f"Got {len(logs)} log entries")
+    effective_server_url = _get_mcp_server_url()
+    print(f"MCP Helper attempting to connect to: {effective_server_url} with timeout {_get_mcp_request_timeout()}s")
+    if _get_mcp_api_key():
+        print("Using API Key for MCP requests.")
+
+    # Test run_browser_task
+    browser_task_description = "Go to example.com, find its title, and then find the link to 'More information...'.

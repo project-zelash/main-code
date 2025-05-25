@@ -70,3 +70,32 @@ logs/
 
 # Automation Workspace
 automation_workspace/
+
+
+# Node.js / JavaScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json # Note: often committed, but can be ignored
+yarn.lock # Note: often committed, but can be ignored
+pnpm-lock.yaml # Note: often committed, but can be ignored
+
+# Build outputs
+build/
+dist/
+out/
+.next/
+.nuxt/
+.svelte-kit/
+.vercel/
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Archives
+*.zip
+*.tar.gz
+*.rar

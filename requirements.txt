@@ -24,6 +24,7 @@ boto3==1.28.0  # For AWS Bedrock
 requests==2.31.0
 playwright==1.35.0
 beautifulsoup4==4.12.2
+browser-use
 
 # Data Processing and Visualization
 pandas==2.0.3
