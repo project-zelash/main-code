@@ -1,0 +1,59 @@
+{
+  "timestamp": "2025-05-25 05:50:48",
+  "tests": {
+    "system_status": {
+      "name": "System Status",
+      "success": true,
+      "details": {
+        "imports": "\u2705 All core components imported successfully",
+        "cli": "\u2705 CLI interface available",
+        "api_key": "\u2705 API key configured"
+      }
+    },
+    "project_generation": {
+      "name": "Project Generation",
+      "success": false,
+      "details": {
+        "command": "python automation_main.py generate-deploy-test --prompt Create a modern personal portfolio landing page website with the following features:\n\n1. Hero section with name, title, and call-to-action button\n2. About section with bio and skills\n3. Projects section with 3 sample project cards (clickable)\n4. Contact section with a working contact form\n5. Navigation menu that smoothly scrolls to sections\n6. Modern CSS styling with hover effects\n7. Responsive design for mobile and desktop\n8. Use vanilla HTML, CSS, and JavaScript (no frameworks)\n9. Include interactive elements like button clicks and form submission\n10. Make it visually appealing with gradients, shadows, and animations\n\nThe website should be fully functional as a single HTML file with embedded CSS and JavaScript.",
+        "generation_time": "71.51 seconds",
+        "exit_code": 1,
+        "stdout": "arsed 3 files from task design_implementation_10\n\u2705 Successfully wrote: about.html\n\u2705 Successfully wrote: about.css\n\u2705 Successfully wrote: about.js\n\u2705 Successfully wrote: index.html\n\u2705 Successfully wrote: style.css\n\u2705 Successfully wrote: script.js\n\u2705 Successfully wrote: index.html\n\u2705 Successfully wrote: style.css\n\u2705 Successfully wrote: script.js\n\u2705 Successfully wrote: placeholder-image.jpg\n\u2705 Successfully wrote: index.html\n\u2705 Successfully wrote: src/frontend/js/form_validation.js\n\u2705 Successfully wrote: src/frontend/js/contact_form.js\n\u2705 Successfully wrote: style.css\n\u2705 Successfully wrote: style.css\n\u2705 Successfully wrote: index.html\n\u2705 Successfully wrote: index.html\n\u2705 Successfully wrote: style.css\n\u2705 Successfully wrote: script.js\n\u2705 Successfully wrote: style.css\n\u2705 Successfully wrote: script.js\n\u2705 Successfully wrote: index.html\n\n============================================================\n\ud83d\udcca AUTOMATION WORKFLOW SUMMARY\n============================================================\n\u274c Workflow failed: 'success'\n",
+        "stderr": "\nINFO:utils.project_generator:\ud83d\udd0d Analyzing generated project...\nINFO:utils.project_generator:\u2705 Project generation completed in 64.17s\nINFO:utils.automation_workflow:\ud83d\ude80 Phase 2: Smart Deployment\nINFO:utils.deployment_manager:\ud83d\ude80 Starting deployment for project: create_modern_personal_20250525_055048\nINFO:utils.deployment_manager:\ud83d\udd0d Detected project type: static\nINFO:utils.deployment_manager:\ud83c\udf10 Starting service...\nINFO:utils.deployment_manager:\ud83c\udf10 Starting service with command: python -m http.server 8000\n",
+        "project_path": "automation_workspace/projects/create_simple_react_20250525_052832/create_simple_react_20250525_052832/.git",
+        "error": "No HTML files found in generated project"
+      }
+    },
+    "project_deployment": {
+      "name": "Project Deployment",
+      "success": false,
+      "details": {
+        "deployment_result": {
+          "success": false,
+          "error": "Unsupported project type: unknown"
+        },
+        "project_path": "automation_workspace/projects/create_simple_react_20250525_052832/create_simple_react_20250525_052832/.git",
+        "error": "Unsupported project type: unknown"
+      }
+    },
+    "website_functionality": {
+      "name": "Website Functionality",
+      "success": false,
+      "details": {
+        "error": "No deployed services to test"
+      }
+    },
+    "cleanup": {
+      "name": "Cleanup",
+      "success": true,
+      "details": {
+        "cleanup_completed": true
+      }
+    }
+  },
+  "overall_success": false,
+  "errors": [],
+  "generated_projects": [
+    "automation_workspace/projects/create_simple_react_20250525_052832/create_simple_react_20250525_052832/.git"
+  ],
+  "deployed_services": []
+}

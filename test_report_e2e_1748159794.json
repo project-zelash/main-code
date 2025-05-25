@@ -1,0 +1,59 @@
+{
+  "timestamp": "2025-05-25 13:24:23",
+  "tests": {
+    "system_status": {
+      "name": "System Status",
+      "success": true,
+      "details": {
+        "imports": "\u2705 All core components imported successfully",
+        "cli": "\u2705 CLI interface available",
+        "api_key": "\u2705 API key configured"
+      }
+    },
+    "project_generation": {
+      "name": "Project Generation",
+      "success": false,
+      "details": {
+        "command": "python automation_main.py generate-deploy-test --prompt Create a modern personal portfolio landing page website with the following features:\n\n1. Hero section with name, title, and call-to-action button\n2. About section with bio and skills\n3. Projects section with 3 sample project cards (clickable)\n4. Contact section with a working contact form\n5. Navigation menu that smoothly scrolls to sections\n6. Modern CSS styling with hover effects\n7. Responsive design for mobile and desktop\n8. Use vanilla HTML, CSS, and JavaScript (no frameworks)\n9. Include interactive elements like button clicks and form submission\n10. Make it visually appealing with gradients, shadows, and animations\n\nThe website should be fully functional as a single HTML file with embedded CSS and JavaScript.",
+        "generation_time": "131.18 seconds",
+        "exit_code": 0,
+        "stdout": "isible elements found: 194\n\u2705 Successfully tested: http://localhost:8081\n   Page Title: Advanced AI Assistant\n   Response Time: 0.56s\n   Content Length: 189387 chars\n   Elements: 194\n\nTesting URL 4/4: http://localhost:7000\nPre-checking URL availability: http://localhost:7000\n\u274c Pre-check failed: Server returned 403\n\n\u2705 Browser testing completed: 3/4 URLs successful\n\n================ BROWSER TESTING COMPLETE ================\n\n\n============================================================\n\ud83d\udcca AUTOMATION WORKFLOW SUMMARY\n============================================================\nStatus: \u2705 SUCCESS\nWorkflow ID: workflow_1748159664\nGenerated Project: /Users/saivishwasgooty/Documents/Projects/Hackathon/main-code/automation_workspace/projects/create_modern_personal_20250525_132424/create_modern_personal_20250525_132424\nDeployment URL: http://localhost:3000\nTest Results: 4 URLs tested\n  - Success Rate: 75.0%\n  - Successful Connections: 3\n============================================================\n",
+        "stderr": "NFO:utils.automation_workflow:\u2705 Phase 3: Browser Testing completed successfully\nINFO:utils.automation_workflow:\ud83d\udcca Phase 4: Generating Report\nINFO:utils.automation_workflow:\u2705 Complete automation workflow finished successfully\nINFO:utils.automation_workflow:\ud83e\uddf9 Cleaning up active deployments...\nINFO:utils.automation_workflow:\ud83e\uddf9 Starting deployment cleanup...\nINFO:utils.automation_workflow:\u2139\ufe0f No active deployment processes found to clean up\nINFO:utils.automation_workflow:\u2705 Deployment cleanup completed\n",
+        "project_path": "automation_workspace/projects/create_modern_personal_20250525_132424/create_modern_personal_20250525_132424/app/web/js",
+        "error": "No HTML files found in generated project"
+      }
+    },
+    "project_deployment": {
+      "name": "Project Deployment",
+      "success": false,
+      "details": {
+        "deployment_result": {
+          "success": false,
+          "error": "Unsupported project type: unknown"
+        },
+        "project_path": "automation_workspace/projects/create_modern_personal_20250525_132424/create_modern_personal_20250525_132424/app/web/js",
+        "error": "Unsupported project type: unknown"
+      }
+    },
+    "website_functionality": {
+      "name": "Website Functionality",
+      "success": false,
+      "details": {
+        "error": "No deployed services to test"
+      }
+    },
+    "cleanup": {
+      "name": "Cleanup",
+      "success": true,
+      "details": {
+        "cleanup_completed": true
+      }
+    }
+  },
+  "overall_success": false,
+  "errors": [],
+  "generated_projects": [
+    "automation_workspace/projects/create_modern_personal_20250525_132424/create_modern_personal_20250525_132424/app/web/js"
+  ],
+  "deployed_services": []
+}
