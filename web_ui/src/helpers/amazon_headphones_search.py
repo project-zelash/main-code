@@ -7,7 +7,7 @@ This script demonstrates how to use the browser agent to:
 2. Search for headphones
 3. View the search results
 
-This script tests various helper functions from the web-ui/src/helpers directory
+This script tests various helper functions from the web_ui/src/helpers directory
 and uses them to automate a search for headphones on Amazon.
 """
 

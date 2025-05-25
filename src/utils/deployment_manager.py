@@ -11,6 +11,7 @@ import time
 import subprocess
 import signal
 import threading
+import socket
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 import logging
@@ -18,7 +19,7 @@ import psutil
 import requests
 from urllib.parse import urlparse
 
-from repository.tools.bash_tool import BashTool
+from src.repository.tools.bash_tool import BashTool
 
 logger = logging.getLogger(__name__)
 
@@ -149,10 +150,69 @@ class DeploymentManager:
             return {"success": False, "error": str(e)}
     
     def _detect_project_type(self, project_path: Path) -> str:
-        """Detect project type based on files in the directory."""
+        """Detect project type based on files in the directory, prioritizing native runtime over deployment tech."""
         files = [f.name for f in project_path.iterdir() if f.is_file()]
         
-        # Node.js projects
+        # Also check subdirectories for HTML files (common in generated projects)
+        all_files = []
+        subdirs = []
+        for root, dirs, files_in_dir in os.walk(project_path):
+            for file in files_in_dir:
+                all_files.append(file)
+            for dir_name in dirs:
+                subdirs.append(dir_name)
+        
+        logger.info(f"🔍 PROJECT TYPE DETECTION: Found files: {files}")
+        logger.info(f"🔍 PROJECT TYPE DETECTION: Found all files (including subdirs): {all_files}")
+        logger.info(f"🔍 PROJECT TYPE DETECTION: Found subdirectories: {subdirs}")
+        
+        # PRIORITY 1: Check for complex multi-service projects (app/, src/, api/, web/ structure)
+        if any(subdir in subdirs for subdir in ['app', 'src']):
+            app_dir = project_path / "app"
+            if app_dir.exists():
+                app_subdirs = [d.name for d in app_dir.iterdir() if d.is_dir()]
+                app_files = []
+                for root, dirs, files_in_dir in os.walk(app_dir):
+                    app_files.extend(files_in_dir)
+                
+                logger.info(f"🔍 PROJECT TYPE DETECTION: App directory structure - subdirs: {app_subdirs}, files: {app_files}")
+                
+                # Check for React/Node.js in app/web/ directory FIRST (prioritize frontend)
+                web_dir = app_dir / "web"
+                if web_dir.exists():
+                    web_files = [f.name for f in web_dir.iterdir() if f.is_file()]
+                    logger.info(f"🔍 PROJECT TYPE DETECTION: Web directory files: {web_files}")
+                    
+                    if "package.json" in web_files:
+                        logger.info("🔍 PROJECT TYPE DETECTION: Detected as fullstack-app (React frontend + backend)")
+                        return "fullstack-app"
+                    elif any(f.endswith(".html") for f in web_files):
+                        logger.info("🔍 PROJECT TYPE DETECTION: Detected as static (HTML files in app/web)")
+                        return "static"
+                
+                # Check for Flask/FastAPI in app/api/ directory
+                api_dir = app_dir / "api"
+                if api_dir.exists():
+                    api_files = [f.name for f in api_dir.iterdir() if f.is_file()]
+                    logger.info(f"🔍 PROJECT TYPE DETECTION: API directory files: {api_files}")
+                    
+                    # Check for Python API
+                    python_dir = api_dir / "python"
+                    if python_dir.exists():
+                        python_files = [f.name for f in python_dir.iterdir() if f.is_file()]
+                        if "app.py" in python_files or "main.py" in python_files:
+                            logger.info("🔍 PROJECT TYPE DETECTION: Detected as flask-api (app/api/python structure)")
+                            return "flask-api"
+                    
+                    # Check for Node.js API
+                    nodejs_dir = api_dir / "nodejs"
+                    if nodejs_dir.exists():
+                        nodejs_files = [f.name for f in nodejs_dir.iterdir() if f.is_file()]
+                        if "index.js" in nodejs_files or "app.js" in nodejs_files:
+                            logger.info("🔍 PROJECT TYPE DETECTION: Detected as express (app/api/nodejs structure)")
+                            return "express"
+        
+        # PRIORITY 2: Node.js projects (check package.json)
         if "package.json" in files:
             try:
                 with open(project_path / "package.json", 'r') as f:
@@ -161,58 +221,74 @@ class DeploymentManager:
                     dev_dependencies = package_json.get("devDependencies", {})
                     
                 if "next" in dependencies:
+                    logger.info("🔍 PROJECT TYPE DETECTION: Detected as nextjs")
                     return "nextjs"
                 elif "react" in dependencies and "vite" in dev_dependencies:
+                    logger.info("🔍 PROJECT TYPE DETECTION: Detected as vite-react")
                     return "vite-react"
                 elif "vue" in dependencies and "vite" in dev_dependencies:
+                    logger.info("🔍 PROJECT TYPE DETECTION: Detected as vite-vue")
                     return "vite-vue"
                 elif "react" in dependencies:
+                    logger.info("🔍 PROJECT TYPE DETECTION: Detected as react")
                     return "react"
                 elif "vue" in dependencies:
+                    logger.info("🔍 PROJECT TYPE DETECTION: Detected as vue")
                     return "vue"
                 elif "express" in dependencies:
+                    logger.info("🔍 PROJECT TYPE DETECTION: Detected as express")
                     return "express"
                 else:
+                    logger.info("🔍 PROJECT TYPE DETECTION: Detected as nodejs")
                     return "nodejs"
             except:
+                logger.info("🔍 PROJECT TYPE DETECTION: Failed to parse package.json, defaulting to nodejs")
                 return "nodejs"
         
-        # Python projects
+        # PRIORITY 3: Python projects
         elif "requirements.txt" in files or "pyproject.toml" in files:
             if "manage.py" in files:
+                logger.info("🔍 PROJECT TYPE DETECTION: Detected as django")
                 return "django"
             elif "app.py" in files or any(f.startswith("main") and f.endswith(".py") for f in files):
+                logger.info("🔍 PROJECT TYPE DETECTION: Detected as flask")
                 return "flask"
             else:
+                logger.info("🔍 PROJECT TYPE DETECTION: Detected as python")
                 return "python"
         
-        # Go projects
+        # PRIORITY 4: Other native runtimes
         elif "go.mod" in files:
+            logger.info("🔍 PROJECT TYPE DETECTION: Detected as go")
             return "go"
-        
-        # Java projects
         elif "pom.xml" in files:
+            logger.info("🔍 PROJECT TYPE DETECTION: Detected as maven")
             return "maven"
         elif "build.gradle" in files:
+            logger.info("🔍 PROJECT TYPE DETECTION: Detected as gradle")
             return "gradle"
-        
-        # Rust projects
         elif "Cargo.toml" in files:
+            logger.info("🔍 PROJECT TYPE DETECTION: Detected as rust")
             return "rust"
-        
-        # .NET projects
         elif any(f.endswith(".csproj") or f.endswith(".sln") for f in files):
+            logger.info("🔍 PROJECT TYPE DETECTION: Detected as dotnet")
             return "dotnet"
         
-        # Docker projects
-        elif "Dockerfile" in files:
-            return "docker"
-        
-        # Static websites
-        elif any(f.endswith(".html") for f in files):
+        # PRIORITY 5: Static websites - check both root files and all files
+        elif any(f.endswith(".html") for f in files) or any(f.endswith(".html") for f in all_files):
+            logger.info("🔍 PROJECT TYPE DETECTION: Detected as static (HTML files found)")
             return "static"
         
+        # LAST RESORT: Docker (only if no native runtime detected)
+        elif "Dockerfile" in files:
+            logger.warning("🔍 PROJECT TYPE DETECTION: Only Dockerfile found, no native runtime detected")
+            logger.warning("🔍 PROJECT TYPE DETECTION: Docker deployment should come AFTER localhost testing")
+            logger.warning("🔍 PROJECT TYPE DETECTION: Treating as unknown project type")
+            return "unknown"
+        
         else:
+            logger.warning(f"🔍 PROJECT TYPE DETECTION: Could not determine project type. Files found: {files}")
+            logger.warning(f"🔍 PROJECT TYPE DETECTION: All files found: {all_files}")
             return "unknown"
     
     def _get_deployment_config(self, project_type: str) -> Optional[Dict[str, Any]]:
@@ -313,16 +389,22 @@ class DeploymentManager:
                 "expected_ports": [5000, 5001],
                 "health_check_paths": ["/"]
             },
-            "docker": {
-                "build_command": "docker build -t app .",
-                "run_command": "docker run -p 3000:3000 app",
-                "expected_ports": [3000],
-                "health_check_paths": ["/"]
-            },
             "static": {
-                "run_command": "python -m http.server 8000",
-                "expected_ports": [8000],
-                "health_check_paths": ["/"]
+                "run_command": "python -m http.server {port}",
+                "expected_ports": [3000, 8080, 9000, 3001, 8081, 4000, 5001, 7000],
+                "health_check_paths": ["/", "/index.html"]
+            },
+            "flask-api": {
+                "install_command": "pip install -r requirements.txt",
+                "run_command": "cd app/api/python && python app.py",
+                "expected_ports": [5000, 8000],
+                "health_check_paths": ["/", "/api", "/health"]
+            },
+            "fullstack-app": {
+                "install_command": "pip install -r requirements.txt",
+                "run_command": "cd app/api/python && python app.py",
+                "expected_ports": [5000, 8000, 3000],
+                "health_check_paths": ["/", "/api", "/health"]
             }
         }
         
@@ -352,34 +434,141 @@ class DeploymentManager:
             logger.error(f"Command execution failed: {str(e)}")
             return {"success": False, "error": str(e)}
     
+    def _find_available_port(self, start_port: int = 3000) -> int:
+        """Find an available port starting from the given port, with Windows-friendly alternatives."""
+        # Windows-friendly port ranges that typically don't require admin privileges
+        windows_safe_ports = [3000, 8080, 9000, 3001, 8081, 4000, 5001, 7000, 9001, 3002, 8082, 4001]
+        
+        # First try the requested port
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('localhost', start_port))
+                logger.info(f"🔍 PORT ALLOCATION: Found available port {start_port}")
+                return start_port
+        except OSError as e:
+            logger.warning(f"⚠️ PORT ALLOCATION: Port {start_port} unavailable: {e}")
+        
+        # Try Windows-safe ports first
+        for port in windows_safe_ports:
+            if port != start_port:  # Skip if we already tried it
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.bind(('localhost', port))
+                        logger.info(f"🔍 PORT ALLOCATION: Found available Windows-safe port {port}")
+                        return port
+                except OSError:
+                    continue
+        
+        # Fallback to scanning a range
+        port = max(start_port, 3000)  # Start from at least 3000
+        while port < 65535:
+            # Skip common restricted ports on Windows
+            if port in [8000, 80, 443, 135, 445, 1433, 3389]:
+                port += 1
+                continue
+                
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('localhost', port))
+                    logger.info(f"🔍 PORT ALLOCATION: Found available port {port}")
+                    return port
+            except OSError:
+                port += 1
+        
+        logger.warning(f"⚠️ PORT ALLOCATION: Could not find any available port, returning {start_port}")
+        return start_port  # Return original port as fallback
+    
     def _start_service(self, command: str, project_path: Path, expected_ports: List[int]) -> Dict[str, Any]:
         """Start a service and monitor it."""
         try:
-            logger.info(f"🌐 Starting service with command: {command}")
+            logger.info(f"🌐 Starting service with command template: {command}")
             
-            # Start process in background
+            # Check if any expected ports are in use and find alternatives
+            available_port = None
+            for port in expected_ports:
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.bind(('localhost', port))
+                        available_port = port
+                        logger.info(f"🔍 PORT CHECK: Port {port} is available")
+                        break
+                except OSError:
+                    logger.warning(f"⚠️ PORT CHECK: Port {port} is already in use")
+                    continue
+            
+            # If no expected ports are available, find an alternative
+            if available_port is None:
+                available_port = self._find_available_port(expected_ports[0] if expected_ports else 3000)
+                logger.info(f"🔍 PORT ALLOCATION: Using alternative port {available_port}")
+            
+            # Substitute the port placeholder in the command
+            final_command = command.replace("{port}", str(available_port))
+            logger.info(f"🌐 Final command with port substitution: {final_command}")
+            
+            # Set the PORT environment variable to ensure the service uses the available port
+            env = os.environ.copy()
+            env['PORT'] = str(available_port)
+            
+            # Start process in background with the PORT environment variable
             process = subprocess.Popen(
-                command,
+                final_command,  # Use the command with port substituted
                 shell=True,
                 cwd=project_path,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=env,
                 preexec_fn=os.setsid if os.name != 'nt' else None
             )
             
-            # Wait a bit for the service to start
-            time.sleep(5)
+            logger.info(f"🌐 SERVICE STARTUP: Process started with PID {process.pid} on port {available_port}")
+            
+            # Wait longer for service to start (React apps can be slow)
+            initial_wait = 10
+            logger.info(f"🌐 SERVICE STARTUP: Waiting {initial_wait}s for initial startup...")
+            time.sleep(initial_wait)
             
             # Check if process is still running
             if process.poll() is not None:
                 stdout, stderr = process.communicate()
+                logger.error(f"❌ SERVICE STARTUP: Process exited early with code {process.returncode}")
+                logger.error(f"❌ SERVICE STARTUP: STDOUT: {stdout.decode()}")
+                logger.error(f"❌ SERVICE STARTUP: STDERR: {stderr.decode()}")
                 return {
                     "success": False,
                     "error": f"Service failed to start. Exit code: {process.returncode}. Error: {stderr.decode()}"
                 }
             
-            # Detect which ports are actually being used
-            service_urls = self._detect_service_urls(expected_ports)
+            logger.info("✅ SERVICE STARTUP: Process is still running, attempting to detect service URLs...")
+            
+            # Try to detect service URLs with retries, including the allocated port
+            service_urls = []
+            max_retries = 6  # Total wait time: 10s initial + (5s * 6) = 40s
+            ports_to_check = [available_port] + [p for p in expected_ports if p != available_port]
+            
+            for attempt in range(max_retries):
+                logger.info(f"🔍 SERVICE STARTUP: Detection attempt {attempt + 1}/{max_retries}")
+                service_urls = self._detect_service_urls(ports_to_check)
+                
+                if service_urls:
+                    logger.info(f"✅ SERVICE STARTUP: Successfully detected service URLs: {service_urls}")
+                    break
+                
+                if attempt < max_retries - 1:  # Don't wait after the last attempt
+                    logger.info(f"⏳ SERVICE STARTUP: No URLs detected yet, waiting 5s before retry...")
+                    time.sleep(5)
+                    
+                    # Check if process is still running
+                    if process.poll() is not None:
+                        stdout, stderr = process.communicate()
+                        logger.error(f"❌ SERVICE STARTUP: Process died during startup")
+                        return {
+                            "success": False,
+                            "error": f"Service process died during startup. Exit code: {process.returncode}"
+                        }
+            
+            if not service_urls:
+                logger.warning("⚠️ SERVICE STARTUP: No service URLs detected after all attempts, but process is running")
+                logger.warning("⚠️ SERVICE STARTUP: This may indicate the service is starting on an unexpected port or isn't ready yet")
             
             return {
                 "success": True,
@@ -388,38 +577,60 @@ class DeploymentManager:
             }
             
         except Exception as e:
-            logger.error(f"Failed to start service: {str(e)}")
+            logger.error(f"❌ SERVICE STARTUP: Failed to start service: {str(e)}")
             return {"success": False, "error": str(e)}
     
     def _detect_service_urls(self, expected_ports: List[int]) -> List[str]:
         """Detect which URLs are serving content."""
         service_urls = []
         
+        logger.info(f"🔍 SERVICE URL DETECTION: Checking expected ports: {expected_ports}")
+        
+        # First try expected ports
         for port in expected_ports:
             url = f"http://localhost:{port}"
+            logger.info(f"🔍 SERVICE URL DETECTION: Testing {url}...")
             try:
                 response = requests.get(url, timeout=5)
+                logger.info(f"🔍 SERVICE URL DETECTION: {url} responded with status {response.status_code}")
                 if response.status_code < 400:
                     service_urls.append(url)
-                    logger.info(f"✅ Service responding at {url}")
-            except:
-                continue
+                    logger.info(f"✅ SERVICE URL DETECTION: Service responding at {url}")
+                else:
+                    logger.warning(f"⚠️ SERVICE URL DETECTION: {url} responded but with error status {response.status_code}")
+            except requests.exceptions.ConnectionError:
+                logger.debug(f"❌ SERVICE URL DETECTION: Connection refused at {url}")
+            except requests.exceptions.Timeout:
+                logger.debug(f"❌ SERVICE URL DETECTION: Timeout at {url}")
+            except Exception as e:
+                logger.debug(f"❌ SERVICE URL DETECTION: Error testing {url}: {str(e)}")
         
-        # If no expected ports work, scan common ports
+        logger.info(f"🔍 SERVICE URL DETECTION: Found {len(service_urls)} responding services on expected ports")
+        
+        # If no service URLs found, try common ports
         if not service_urls:
-            common_ports = [3000, 8000, 5000, 8080, 4173, 5173]
+            logger.info("🔍 SERVICE URL DETECTION: No services found on expected ports, scanning common ports...")
+            common_ports = [3000, 8000, 5000, 8080, 4173, 5173, 9000, 4000]
+            
             for port in common_ports:
                 if port not in expected_ports:
                     url = f"http://localhost:{port}"
+                    logger.debug(f"🔍 SERVICE URL DETECTION: Testing common port {url}...")
                     try:
-                        response = requests.get(url, timeout=2)
+                        response = requests.get(url, timeout=3)
                         if response.status_code < 400:
                             service_urls.append(url)
-                            logger.info(f"✅ Service found at {url}")
-                            break
+                            logger.info(f"✅ SERVICE URL DETECTION: Service found at {url}")
+                            break  # Found one, that's enough for now
                     except:
                         continue
+            
+            if service_urls:
+                logger.info(f"✅ SERVICE URL DETECTION: Found service on common port: {service_urls}")
+            else:
+                logger.warning("⚠️ SERVICE URL DETECTION: No responding services found on any common ports")
         
+        logger.info(f"🔍 SERVICE URL DETECTION: Final result: {service_urls}")
         return service_urls
     
     def stop_deployment(self, deployment_id: str) -> Dict[str, Any]:

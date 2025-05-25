@@ -20,7 +20,11 @@ from utils.deployment_manager import DeploymentManager
 from utils.browser_testing_manager import BrowserTestingManager
 from service.llm_factory import LLMFactory
 from service.tool_service import ToolService
+from repository.execution.agent_manager import AgentManager
 from repository.tools.bash_tool import BashTool
+from repository.execution.build_test_manager import BuildTestManager
+from repository.execution.testing_framework import TestingFramework
+from repository.execution.feedback_analyzer import FeedbackAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,25 @@ class AutomationWorkflow:
             headless=headless_browser
         )
         
+        # Initialize AgentService for refinement loop
+        self.agent_service = AgentManager(
+            llm_factory=self.llm_factory,
+            tool_service=self.tool_service
+        )
+        
+        # Add BuildTestManager for refinement loop
+        self.testing_framework = TestingFramework(
+            workspace_path=str(self.workspace_path / "projects"),
+            llm_factory=self.llm_factory
+        )
+        self.feedback_analyzer = FeedbackAnalyzer(llm_factory=self.llm_factory)
+        self.build_test_manager = BuildTestManager(
+            tool_service=self.tool_service,
+            testing_framework=self.testing_framework,
+            feedback_analyzer=self.feedback_analyzer,
+            workspace_path=str(self.workspace_path / "projects")
+        )
+        
         # Workflow history
         self.workflow_history = []
         
@@ -75,7 +98,19 @@ class AutomationWorkflow:
         tool_service.register_tool("bash", BashTool())
         return tool_service
     
-    def run_complete_workflow(
+    def _setup_refinement_agents(self) -> Dict[str, Any]:
+        """Setup agents for the refinement loop using AgentManager."""
+        # AgentManager already initializes backend, frontend, and middleware agents
+        agents = {}
+        
+        # Get the pre-initialized agents from AgentManager
+        agents["backend"] = self.agent_service.get_agent("backend")
+        agents["frontend"] = self.agent_service.get_agent("frontend") 
+        agents["general"] = self.agent_service.get_agent("middleware")  # Use middleware as general agent
+        
+        return agents
+    
+    async def run_complete_workflow(
         self,
         prompt: Optional[str] = None,
         prompt_method: str = "interactive",
@@ -138,12 +173,14 @@ class AutomationWorkflow:
                     "result": generation_result
                 }
                 workflow_result["status"] = "failed"
+                logger.error(f"❌ Generation failed: {generation_result.get('error', 'Unknown generation error')}")
                 return workflow_result
             
             workflow_result["phases"]["generation"] = {
                 "status": "completed",
                 "result": generation_result
             }
+            logger.info("✅ Phase 1: Project Generation completed successfully")
             
             project_path = generation_result.get("project_output_directory") or generation_result.get("project_workspace")
             
@@ -162,90 +199,305 @@ class AutomationWorkflow:
                 )
                 
                 if not deployment_result.get("success"):
+                    logger.error(f"❌ Deployment failed: {deployment_result.get('error', 'Unknown deployment error')}")
+                    
+                    # --- REFINEMENT LOOP ON DEPLOYMENT FAILURE ---
+                    logger.info("🔄 REFINEMENT LOOP: Starting refinement for deployment failure...")
+                    logger.info(f"🔄 REFINEMENT LOOP: Error to fix: {deployment_result.get('error', 'Unknown deployment error')}")
+                    
+                    error_log = deployment_result.get("error", "Unknown deployment error")
+                    agents = self._setup_refinement_agents()
+                    logger.info(f"🔄 REFINEMENT LOOP: Available agents: {list(agents.keys())}")
+                    
+                    project_manager = self.project_generator
+                    analysis_result = {"fix_tasks": [{
+                        "description": error_log,
+                        "file_path": project_path,  # Use project_path instead of project_name
+                        "issue_type": "DeploymentError",
+                        "severity": "high",
+                        "code_context": "",
+                        "suggested_fix": "Fix the deployment error by ensuring the application entry point exists and is properly configured."
+                    }]}
+                    
+                    logger.info("🔄 REFINEMENT LOOP: Starting refinement loop with max_iterations=3...")
+                    try:
+                        refinement_result = self.build_test_manager.run_refinement_loop(
+                            analysis_result=analysis_result,
+                            agents=agents,
+                            project_manager=project_manager,
+                            max_iterations=3
+                        )
+                        
+                        logger.info(f"🔄 REFINEMENT LOOP: Refinement completed with success={refinement_result.get('success', False)}")
+                        
+                        # If refinement was successful, retry deployment
+                        if refinement_result.get("success"):
+                            logger.info("🔄 REFINEMENT LOOP: Retrying deployment after fixes...")
+                            deployment_result = self.deployment_manager.deploy_project(
+                                project_path=project_path,
+                                force_type=force_project_type
+                            )
+                            
+                            # Update workflow result with refinement information
+                            workflow_result["phases"]["deployment"]["refinement_result"] = refinement_result
+                            workflow_result["phases"]["deployment"]["result"] = deployment_result
+                            
+                            if deployment_result.get("success"):
+                                logger.info("✅ REFINEMENT LOOP: Retry deployment successful!")
+                            else:
+                                logger.error("❌ REFINEMENT LOOP: Retry deployment failed")
+                        else:
+                            logger.error("❌ REFINEMENT LOOP: Refinement failed")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ REFINEMENT LOOP: Exception during refinement: {str(e)}")
+                        logger.error(f"❌ REFINEMENT LOOP: Exception type: {type(e).__name__}")
+                        import traceback
+                        logger.error(f"❌ REFINEMENT LOOP: Full traceback: {traceback.format_exc()}")
+                    
                     workflow_result["phases"]["deployment"] = {
                         "status": "failed",
-                        "error": deployment_result.get("error", "Unknown deployment error"),
+                        "error": error_log,
+                        "result": deployment_result,
+                    }
+                else:
+                    workflow_result["phases"]["deployment"] = {
+                        "status": "completed",
                         "result": deployment_result
                     }
-                    workflow_result["status"] = "failed"
-                    return workflow_result
-                
-                workflow_result["phases"]["deployment"] = {
-                    "status": "completed",
-                    "result": deployment_result
-                }
+                    logger.info("✅ Phase 2: Deployment completed successfully")
                 
                 service_urls = deployment_result.get("service_urls", [])
+                logger.info(f"🔍 Service URLs detected: {service_urls}")
+                
+                # Check if we should attempt to force service URL detection
+                if not service_urls and deployment_result.get("success"):
+                    logger.warning("⚠️ Deployment succeeded but no service URLs detected")
+                    logger.info("🔍 Attempting to detect service URLs manually...")
+                    
+                    # Try to detect common ports
+                    potential_urls = ["http://localhost:3000", "http://localhost:8080", "http://localhost:5000", "http://localhost:9000"]
+                    detected_urls = []
+                    
+                    for url in potential_urls:
+                        try:
+                            import requests
+                            response = requests.get(url, timeout=2)
+                            if response.status_code == 200:
+                                detected_urls.append(url)
+                                logger.info(f"✅ Found responding service at: {url}")
+                        except:
+                            logger.debug(f"❌ No service responding at: {url}")
+                    
+                    if detected_urls:
+                        service_urls = detected_urls
+                        deployment_result["service_urls"] = service_urls
+                        logger.info(f"✅ Manually detected service URLs: {service_urls}")
+                    else:
+                        logger.warning("⚠️ No responding services found on common ports")
+                
+                logger.info(f"🔍 REFINEMENT CHECK: skip_testing={skip_testing}, service_urls={service_urls}")
+                logger.info(f"🔍 REFINEMENT CHECK: deployment_success={deployment_result.get('success')}")
                 
                 if skip_testing or not service_urls:
                     if not service_urls:
-                        logger.info("⏭️ No service URLs available, skipping testing")
+                        logger.info("⏭️ No service URLs available, checking if refinement should run...")
+                        
+                        # Consider this a deployment issue and run refinement loop
+                        if deployment_result.get("success"):
+                            logger.info("🔄 REFINEMENT LOOP: STARTING - Deployment succeeded but no service URLs detected")
+                            logger.info("🔄 REFINEMENT LOOP: This indicates the application may not be properly configured to start a web server")
+                            
+                            agents = self._setup_refinement_agents()
+                            logger.info(f"🔄 REFINEMENT LOOP: Initialized agents: {list(agents.keys())}")
+                            
+                            project_manager = self.project_generator
+                            analysis_result = {"fix_tasks": [{
+                                "description": "Deployment succeeded but no service URLs were detected. The application may not be configured to start a web server or may be listening on an unexpected port.",
+                                "file_path": None,
+                                "issue_type": "ServiceURLDetectionError",
+                                "severity": "medium",
+                                "code_context": "",
+                                "suggested_fix": "Ensure the application starts a web server and listens on a standard port (3000, 8080, 5000, etc.)"
+                            }]}
+                            
+                            logger.info("🔄 REFINEMENT LOOP: Running refinement for service URL detection...")
+                            logger.info(f"🔄 REFINEMENT LOOP: Project path: {project_path}")
+                            
+                            try:
+                                refinement_result = self.build_test_manager.run_refinement_loop(
+                                    analysis_result=analysis_result,
+                                    agents=agents,
+                                    project_manager=project_manager,
+                                    max_iterations=2
+                                )
+                                
+                                logger.info(f"🔄 REFINEMENT LOOP: Service URL refinement completed with success={refinement_result.get('success', False)}")
+                                
+                                # If refinement was successful, retry deployment
+                                if refinement_result.get("success"):
+                                    logger.info("🔄 REFINEMENT LOOP: Retrying deployment after service URL fixes...")
+                                    deployment_result = self.deployment_manager.deploy_project(
+                                        project_path=project_path,
+                                        force_type=force_project_type
+                                    )
+                                    service_urls = deployment_result.get("service_urls", [])
+                                    logger.info(f"🔄 REFINEMENT LOOP: After retry, service URLs: {service_urls}")
+                                    
+                                    # Update workflow result with refinement information
+                                    workflow_result["phases"]["deployment"]["refinement_result"] = refinement_result
+                                    workflow_result["phases"]["deployment"]["result"] = deployment_result
+                                else:
+                                    logger.error("❌ REFINEMENT LOOP: Service URL refinement failed")
+                                    
+                            except Exception as e:
+                                logger.error(f"❌ REFINEMENT LOOP: Exception during refinement: {str(e)}")
+                                logger.error(f"❌ REFINEMENT LOOP: Exception type: {type(e).__name__}")
+                        else:
+                            logger.info("⏭️ Deployment failed, refinement already handled in deployment section")
                     else:
-                        logger.info("⏭️ Skipping testing phase")
+                        logger.info("⏭️ Skipping testing phase as requested")
+                    
+                    logger.info(f"🔍 FINAL SERVICE URLs after refinement attempts: {service_urls}")
                     workflow_result["phases"]["testing"]["status"] = "skipped"
                 else:
                     # Phase 3: Browser Testing
                     logger.info("🧪 Phase 3: Browser Testing")
+                    logger.info(f"🧪 Testing URLs: {service_urls}")
                     workflow_result["phases"]["testing"]["status"] = "running"
                     
                     # Wait a bit for services to fully start
                     logger.info("⏳ Waiting for services to stabilize...")
                     time.sleep(10)
                     
-                    testing_result = self.browser_testing_manager.test_application(
-                        service_urls=service_urls,
-                        custom_tests=custom_tests
-                    )
+                    # FIX: Properly await the async test_application method
+                    try:
+                        # Create an event loop if one doesn't exist
+                        try:
+                            loop = asyncio.get_event_loop()
+                        except RuntimeError:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                        
+                        # Run the async function properly
+                        testing_result = await self.browser_testing_manager.test_application(
+                            service_urls=service_urls,
+                            custom_tests=custom_tests
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ Browser testing failed with exception: {str(e)}")
+                        testing_result = {"success": False, "error": str(e)}
                     
-                    workflow_result["phases"]["testing"] = {
-                        "status": "completed" if testing_result.get("success") else "failed",
-                        "result": testing_result
-                    }
+                    if not testing_result.get("success"):
+                        logger.error(f"❌ Browser testing failed: {testing_result.get('error', 'Unknown browser test error')}")
+                        
+                        # --- REFINEMENT LOOP ON BROWSER TEST FAILURE (DOM/UI) ---
+                        logger.info("🔄 REFINEMENT LOOP: Starting refinement for browser testing failure...")
+                        logger.info(f"🔄 REFINEMENT LOOP: Browser test error: {testing_result.get('error', 'Unknown browser test error')}")
+                        
+                        error_log = testing_result.get("error", "Unknown browser test error")
+                        agents = self._setup_refinement_agents()
+                        logger.info(f"🔄 REFINEMENT LOOP: Available agents: {list(agents.keys())}")
+                        
+                        project_manager = self.project_generator
+                        analysis_result = {"fix_tasks": [{
+                            "description": error_log,
+                            "file_path": None,
+                            "issue_type": "BrowserTestError",
+                            "severity": "high",
+                            "code_context": "",
+                            "suggested_fix": "Fix the browser/DOM/UI test error."
+                        }]}
+                        
+                        logger.info("🔄 REFINEMENT LOOP: Starting browser testing refinement loop...")
+                        try:
+                            refinement_result = self.build_test_manager.run_refinement_loop(
+                                analysis_result=analysis_result,
+                                agents=agents,
+                                project_manager=project_manager,
+                                max_iterations=2
+                            )
+                            
+                            logger.info(f"🔄 REFINEMENT LOOP: Browser test refinement completed with success={refinement_result.get('success', False)}")
+                            
+                            # If refinement was successful, retry browser testing
+                            if refinement_result.get("success"):
+                                logger.info("🔄 REFINEMENT LOOP: Retrying browser testing after UI fixes...")
+                                # Retry deployment first to apply fixes
+                                deployment_result = self.deployment_manager.deploy_project(
+                                    project_path=project_path,
+                                    force_type=force_project_type
+                                )
+                                service_urls = deployment_result.get("service_urls", [])
+                                
+                                if service_urls:
+                                    time.sleep(5)  # Brief wait for restart
+                                    testing_result = await self.browser_testing_manager.test_application(
+                                        service_urls=service_urls,
+                                        custom_tests=custom_tests
+                                    )
+                                    logger.info(f"🔄 REFINEMENT LOOP: Retry browser testing success={testing_result.get('success', False)}")
+                                else:
+                                    logger.error("❌ REFINEMENT LOOP: No service URLs after retry deployment")
+                            else:
+                                logger.error("❌ REFINEMENT LOOP: Browser test refinement failed")
+                                
+                        except Exception as e:
+                            logger.error(f"❌ REFINEMENT LOOP: Exception during browser test refinement: {str(e)}")
+                        
+                        workflow_result["phases"]["testing"] = {
+                            "status": "failed" if not testing_result.get("success") else "completed",
+                            "error": testing_result.get("error") if not testing_result.get("success") else None,
+                            "result": testing_result
+                        }
+                    else:
+                        workflow_result["phases"]["testing"] = {
+                            "status": "completed",
+                            "result": testing_result
+                        }
+                        logger.info("✅ Phase 3: Browser Testing completed successfully")
             
-            # Phase 4: Comprehensive Reporting
-            logger.info("📊 Phase 4: Generating Comprehensive Report")
+            # Phase 4: Reporting
+            logger.info("📊 Phase 4: Generating Report")
             workflow_result["phases"]["reporting"]["status"] = "running"
             
-            comprehensive_report = self._generate_comprehensive_report(workflow_result)
-            
+            # Generate comprehensive report
+            report = self._generate_comprehensive_report(workflow_result)
             workflow_result["phases"]["reporting"] = {
                 "status": "completed",
-                "result": comprehensive_report
+                "result": report
             }
             
-            # Final workflow status
-            end_time = time.time()
-            total_time = end_time - start_time
+            workflow_result["status"] = "completed"
+            workflow_result["completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            workflow_result["duration"] = time.time() - start_time
             
-            failed_phases = [name for name, phase in workflow_result["phases"].items() 
-                           if phase["status"] == "failed"]
-            
-            workflow_result.update({
-                "status": "failed" if failed_phases else "completed",
-                "completed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "total_time_seconds": round(total_time, 2),
-                "failed_phases": failed_phases,
-                "comprehensive_report": comprehensive_report
-            })
-            
-            # Save to workflow history
-            self.workflow_history.append(workflow_result)
-            self._save_workflow_history()
-            
-            logger.info(f"✅ Workflow {workflow_id} completed in {total_time:.2f}s")
-            
-            return workflow_result
+            logger.info("✅ Complete automation workflow finished successfully")
             
         except Exception as e:
-            logger.error(f"❌ Workflow failed: {str(e)}")
+            logger.error(f"❌ Workflow failed with exception: {str(e)}")
+            logger.error(f"❌ Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"❌ Exception traceback:\n{traceback.format_exc()}")
             
-            workflow_result.update({
-                "status": "error",
-                "error": str(e),
-                "completed_at": time.strftime("%Y-%m-%d %H:%M:%S")
-            })
-            
-            return workflow_result
+            workflow_result["status"] = "failed"
+            workflow_result["error"] = str(e)
+            workflow_result["completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            workflow_result["duration"] = time.time() - start_time
+        
+        finally:
+            # CLEANUP: Stop active deployments before exiting
+            logger.info("🧹 Cleaning up active deployments...")
+            try:
+                self.cleanup_active_deployments()
+                logger.info("✅ Deployment cleanup completed")
+            except Exception as e:
+                logger.error(f"❌ Deployment cleanup failed: {str(e)}")
+        
+        # Save workflow to history
+        self._save_workflow_history()
+        
+        return workflow_result
     
     def _generate_comprehensive_report(self, workflow_result: Dict[str, Any]) -> Dict[str, Any]:
         """Generate a comprehensive report of the entire workflow."""
@@ -403,9 +655,50 @@ class AutomationWorkflow:
         return results
     
     def cleanup_active_deployments(self) -> Dict[str, Any]:
-        """Clean up all active deployments."""
-        logger.info("🧹 Cleaning up active deployments")
-        return self.deployment_manager.stop_all_deployments()
+        """
+        Clean up active deployments by stopping running services.
+        
+        Returns:
+            Dict with cleanup results
+        """
+        logger.info("🧹 Starting deployment cleanup...")
+        cleanup_result = {
+            "cleanup_attempted": True,
+            "services_stopped": [],
+            "errors": []
+        }
+        
+        try:
+            # Stop deployments using the deployment manager
+            if hasattr(self.deployment_manager, 'stop_all_services'):
+                stop_result = self.deployment_manager.stop_all_services()
+                cleanup_result.update(stop_result)
+                logger.info(f"✅ Deployment manager cleanup completed: {stop_result}")
+            elif hasattr(self.deployment_manager, 'active_processes'):
+                # Manually stop processes if the method doesn't exist
+                stopped_count = 0
+                for process_info in getattr(self.deployment_manager, 'active_processes', []):
+                    try:
+                        if 'process' in process_info and process_info['process']:
+                            process_info['process'].terminate()
+                            stopped_count += 1
+                            cleanup_result["services_stopped"].append(f"PID {process_info['process'].pid}")
+                            logger.info(f"✅ Stopped process PID {process_info['process'].pid}")
+                    except Exception as e:
+                        error_msg = f"Failed to stop process: {str(e)}"
+                        cleanup_result["errors"].append(error_msg)
+                        logger.error(f"❌ {error_msg}")
+                
+                logger.info(f"✅ Manually stopped {stopped_count} processes")
+            else:
+                logger.info("ℹ️ No active deployment processes found to clean up")
+                
+        except Exception as e:
+            error_msg = f"Cleanup failed: {str(e)}"
+            cleanup_result["errors"].append(error_msg)
+            logger.error(f"❌ {error_msg}")
+        
+        return cleanup_result
     
     def get_workflow_history(self) -> List[Dict[str, Any]]:
         """Get the history of all workflow runs."""

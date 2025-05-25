@@ -33,10 +33,9 @@ class CodeGenerationCoordinator:
         if external_projects_dir:
             self.external_projects_dir = external_projects_dir
         else:
-            # Default: create projects directory outside the main repo
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-            self.external_projects_dir = os.path.join(os.path.dirname(repo_root), "generated_projects")
+            # Use the workspace project directory instead of external path
+            # This will be set properly when set_project_output_directory is called
+            self.external_projects_dir = None
         
         self.current_project_path = None
         
@@ -168,18 +167,28 @@ Tech Stack: {', '.join(tech_stack)}
 Project Description: {project_description}
 
 IMPORTANT: You must return your response as a JSON array of file objects. Each file object must have exactly these keys:
-- "path": The relative file path (e.g., "src/backend/models.py", "src/frontend/components/App.{extension_map.get('frontend', 'js')}")
+- "path": The relative file path (e.g., "app/api/{extension_map.get('backend', 'py')}", "app/web/components/App.{extension_map.get('frontend', 'js')}")
 - "content": The complete file content as a string
+
+IMPORTANT PROJECT STRUCTURE:
+Use this structure for generated applications to avoid confusion with the AI framework:
+- app/api/ - for backend/server code  
+- app/web/ - for frontend/client code
+- app/middleware/ - for middleware components
+- app/shared/ - for shared utilities and types
+- configs/ - for configuration files
+- scripts/ - for deployment and build scripts
+- docs/ - for documentation
 
 Example response format:
 [
   {{
-    "path": "src/{layer}/example.{extension_map.get(layer, 'py')}",
+    "path": "app/{self._get_app_directory(layer)}/example.{extension_map.get(layer, 'py')}",
     "content": "// Complete file content here\\nfunction example() {{\\n  return 'Hello World';\\n}}"
   }},
   {{
-    "path": "src/{layer}/another_file.{extension_map.get(layer, 'py')}",
-    "content": "# Another complete file\\nprint('Generated code')"
+    "path": "configs/docker-compose.yml",
+    "content": "version: '3.8'\\nservices:\\n  app:\\n    build: ."
   }}
 ]
 
@@ -371,11 +380,19 @@ Return ONLY the JSON array - no explanations, no markdown formatting, just the r
             Path to the created project directory
         """
         try:
-            # Create the external projects directory if it doesn't exist
+            # If external_projects_dir is None, use the workspace automation directory
+            if self.external_projects_dir is None:
+                # Use the automation workspace project directory structure
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                repo_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+                automation_workspace = os.path.join(repo_root, "automation_workspace", "projects")
+                self.external_projects_dir = automation_workspace
+            
+            # Create the projects directory if it doesn't exist
             os.makedirs(self.external_projects_dir, exist_ok=True)
             
             # Create project-specific directory
-            project_dir = os.path.join(self.external_projects_dir, project_name)
+            project_dir = os.path.join(self.external_projects_dir, project_name, project_name)
             os.makedirs(project_dir, exist_ok=True)
             
             self.current_project_path = project_dir
@@ -645,6 +662,24 @@ Return ONLY the JSON array - no explanations, no markdown formatting, just the r
             logger.error(f"Error parsing agent result: {e}")
             return []
     
+    def _get_app_directory(self, layer: str) -> str:
+        """
+        Get the appropriate app directory based on the layer.
+        
+        Args:
+            layer: The component layer (backend, frontend, middleware, design)
+            
+        Returns:
+            Directory path within the app folder
+        """
+        directory_mapping = {
+            "backend": "api",
+            "frontend": "web", 
+            "design": "web/styles",
+            "middleware": "middleware"
+        }
+        return directory_mapping.get(layer, "shared")
+
     def _parse_string_result(self, task_name: str, result: str) -> Optional[Dict[str, str]]:
         """Parse text result from agent to extract file information."""
         # Extract task info to determine appropriate file location
@@ -661,8 +696,9 @@ Return ONLY the JSON array - no explanations, no markdown formatting, just the r
         }
         extension = extension_map.get(layer, "txt")
         
-        # Create file path
-        file_path = f"src/{layer}/{task_name}.{extension}"
+        # Create file path using new structure
+        app_dir = self._get_app_directory(layer)
+        file_path = f"app/{app_dir}/{task_name}.{extension}"
         
         return {
             "path": file_path,

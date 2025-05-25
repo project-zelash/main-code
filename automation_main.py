@@ -51,35 +51,63 @@ class AutomationCLI:
         print(f"🚀 Starting complete automation pipeline for: {prompt}")
         
         try:
-            result = self.workflow.run_complete_workflow(
+            # Await the async workflow method
+            result = asyncio.run(self.workflow.run_complete_workflow(
                 prompt=prompt,
+                prompt_method="custom",
                 force_project_type=project_type,
                 custom_tests=test_scenarios or []
-            )
+            ))
             
             # Print summary
             print("\n" + "="*60)
             print("📊 AUTOMATION WORKFLOW SUMMARY")
             print("="*60)
-            print(f"Status: {'✅ SUCCESS' if result['success'] else '❌ FAILED'}")
-            print(f"Workflow ID: {result['workflow_id']}")
-            print(f"Generated Project: {result.get('project_path', 'N/A')}")
-            print(f"Deployment URL: {result.get('deployment_url', 'N/A')}")
-            print(f"Test Results: {result.get('test_summary', {}).get('total_tests', 0)} tests")
             
-            if result.get('test_summary'):
-                test_summary = result['test_summary']
-                print(f"  - Passed: {test_summary.get('passed', 0)}")
-                print(f"  - Failed: {test_summary.get('failed', 0)}")
-                print(f"  - Score: {test_summary.get('overall_score', 0):.1f}%")
+            # Handle the actual workflow result structure
+            success = result.get("status") == "completed"
+            print(f"Status: {'✅ SUCCESS' if success else '❌ FAILED'}")
+            print(f"Workflow ID: {result.get('workflow_id', 'N/A')}")
             
-            print(f"Report Location: {result.get('report_path', 'N/A')}")
+            # Extract project path from generation result
+            gen_result = result.get("phases", {}).get("generation", {}).get("result", {})
+            project_path = gen_result.get("project_output_directory") or gen_result.get("project_workspace", "N/A")
+            print(f"Generated Project: {project_path}")
+            
+            # Extract deployment info
+            dep_result = result.get("phases", {}).get("deployment", {}).get("result", {})
+            service_urls = dep_result.get("service_urls", [])
+            deployment_url = service_urls[0] if service_urls else "N/A"
+            print(f"Deployment URL: {deployment_url}")
+            
+            # Extract test results
+            test_result = result.get("phases", {}).get("testing", {}).get("result", {})
+            if test_result:
+                test_report = test_result.get("test_report", {})
+                summary = test_report.get("summary", {})
+                print(f"Test Results: {summary.get('total_urls_tested', 0)} URLs tested")
+                print(f"  - Success Rate: {summary.get('overall_success_rate', 0):.1f}%")
+                print(f"  - Successful Connections: {summary.get('successful_connections', 0)}")
+            else:
+                print("Test Results: No tests run")
+            
+            # Show error details if failed
+            if not success:
+                failed_phases = result.get("failed_phases", [])
+                if failed_phases:
+                    print(f"Failed Phases: {', '.join(failed_phases)}")
+                
+                error = result.get("error")
+                if error:
+                    print(f"Error: {error}")
+            
             print("="*60)
             
-            return result
+            return {"success": success, **result}
             
         except Exception as e:
-            print(f"❌ Workflow failed: {e}")
+            print(f"❌ Workflow failed with exception: {e}")
+            print(f"❌ Exception type: {type(e).__name__}")
             return {"success": False, "error": str(e)}
     
     def batch_workflow(self, config_path: str) -> List[Dict]:

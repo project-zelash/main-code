@@ -343,6 +343,22 @@ class BuildTestManager:
         """
         fixes_applied = False
         
+        # Get project name from project manager, with robust fallback handling
+        try:
+            if hasattr(project_manager, 'project_name'):
+                project_name = project_manager.project_name
+            elif hasattr(project_manager, 'project_id'):
+                project_name = project_manager.project_id
+            elif hasattr(project_manager, 'workspace_path'):
+                # Extract project name from workspace path
+                import os
+                project_name = os.path.basename(project_manager.workspace_path.rstrip('/\\'))
+            else:
+                project_name = 'unknown_project'
+        except Exception as e:
+            print(f"Warning: Could not determine project name: {e}")
+            project_name = 'unknown_project'
+        
         for fix_task in fix_tasks:
             try:
                 agent_type = fix_task.get("agent_type", "backend")
@@ -352,23 +368,40 @@ class BuildTestManager:
                     print(f"Agent '{agent_type}' not found for fix task")
                     continue
                 
-                fix_prompt = self._build_fix_prompt(fix_task, project_manager.project_name)
+                fix_prompt = self._build_fix_prompt(fix_task, project_name)
                 fix_result = agent.run(fix_prompt)
                 
                 # Process fix result and save files
                 if fix_result and isinstance(fix_result, list):
                     for file_info in fix_result:
                         if isinstance(file_info, dict) and "path" in file_info and "content" in file_info:
-                            project_manager.save_code_to_file(file_info["path"], file_info["content"])
-                            fixes_applied = True
+                            # Try to save using project manager if available
+                            try:
+                                if hasattr(project_manager, 'save_code_to_file'):
+                                    project_manager.save_code_to_file(file_info["path"], file_info["content"])
+                                    fixes_applied = True
+                                else:
+                                    # Fallback: write file directly
+                                    file_path = file_info["path"]
+                                    with open(file_path, 'w', encoding='utf-8') as f:
+                                        f.write(file_info["content"])
+                                    fixes_applied = True
+                            except Exception as save_error:
+                                print(f"Error saving file {file_info['path']}: {save_error}")
+                                continue
                             
             except Exception as e:
                 print(f"Error applying fix: {str(e)}")
                 continue
         
-        # Commit changes if fixes were applied
+        # Commit changes if fixes were applied and project manager supports it
         if fixes_applied:
-            project_manager.commit_changes("Applied fixes from refinement loop")
+            try:
+                if hasattr(project_manager, 'commit_changes'):
+                    project_manager.commit_changes("Applied fixes from refinement loop")
+            except Exception as commit_error:
+                print(f"Error committing changes: {commit_error}")
+                # Don't fail the entire operation for commit errors
             
         return fixes_applied
     

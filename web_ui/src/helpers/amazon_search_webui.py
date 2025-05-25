@@ -41,7 +41,7 @@ parent_dir = os.path.dirname(os.path.dirname(current_dir))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-# Import necessary components from the web-ui structure
+# Import necessary components from the web_ui structure
 from src.webui.webui_manager import WebuiManager
 from src.webui.components.browser_use_agent_tab import run_agent_task
 from src.utils import llm_provider
@@ -182,6 +182,6 @@ async def main() -> None:
 
 if __name__ == "__main__":
     # Set up the event loop and run the main function
-    print_colored("This script integrates with the web-ui components to search for headphones on Amazon", "cyan")
+    print_colored("This script integrates with the web_ui components to search for headphones on Amazon", "cyan")
     print_colored("It triggers the same objects that get activated when clicking buttons on the interface", "cyan")
     asyncio.run(main())
