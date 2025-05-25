@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Server for Playwright Testing</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f0f0f0; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        .status { color: green; font-weight: bold; font-size: 18px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DirectPlaywrightTester Test Page</h1>
+        <p class="status">Test server is running successfully!</p>
+        <p>This page is served by Python's HTTP server for testing browser automation.</p>
+        <button onclick="alert('Button clicked!')">Test Button</button>
+        <div id="content">
+            <p>Test content for validation</p>
+            <ul>
+                <li>Item 1</li>
+                <li>Item 2</li>
+                <li>Item 3</li>
+            </ul>
+        </div>
+    </div>
+    <script>
+        console.log('Test page loaded successfully');
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM content loaded');
+        });
+    </script>
+</body>
+</html>

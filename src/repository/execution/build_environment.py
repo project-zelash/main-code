@@ -3,6 +3,7 @@ import os
 import subprocess
 import json
 import shutil
+import socket
 
 class BuildEnvironment:
     """
@@ -20,7 +21,95 @@ class BuildEnvironment:
         self.initialized = False
         self.project_type = None
         self.build_config = {}
+        self.allocated_ports = set()  # Track allocated ports
     
+    def _is_port_available(self, port: int) -> bool:
+        """
+        Check if a port is available for use.
+        
+        Args:
+            port: Port number to check.
+            
+        Returns:
+            True if port is available, False otherwise.
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(('localhost', port))
+                return port not in self.allocated_ports
+        except socket.error:
+            return False
+    
+    def _find_available_port(self, preferred_port: int, port_range: range = range(3000, 9000)) -> int:
+        """
+        Find an available port, starting with the preferred port.
+        
+        Args:
+            preferred_port: The preferred port to use.
+            port_range: Range of ports to search in.
+            
+        Returns:
+            Available port number.
+        """
+        # Try preferred port first
+        if self._is_port_available(preferred_port):
+            self.allocated_ports.add(preferred_port)
+            return preferred_port
+        
+        # Search for alternative port
+        for port in port_range:
+            if port != preferred_port and self._is_port_available(port):
+                self.allocated_ports.add(port)
+                return port
+                
+        # If no port found in range, try higher ports
+        for port in range(9000, 10000):
+            if self._is_port_available(port):
+                self.allocated_ports.add(port)
+                return port
+                
+        raise RuntimeError("No available ports found")
+
+    def release_port(self, port: int) -> bool:
+        """
+        Release a previously allocated port.
+        
+        Args:
+            port: Port number to release.
+            
+        Returns:
+            True if port was released, False if it wasn't allocated.
+        """
+        if port in self.allocated_ports:
+            self.allocated_ports.remove(port)
+            return True
+        return False
+    
+    def get_allocated_ports(self) -> Dict[str, Any]:
+        """
+        Get information about currently allocated ports.
+        
+        Returns:
+            Dictionary with port allocation information.
+        """
+        return {
+            "allocated_ports": list(self.allocated_ports),
+            "count": len(self.allocated_ports),
+            "next_available": self._find_next_available_port() if len(self.allocated_ports) > 0 else None
+        }
+    
+    def _find_next_available_port(self) -> Optional[int]:
+        """
+        Find the next available port without allocating it.
+        
+        Returns:
+            Next available port number or None if none found.
+        """
+        for port in range(3000, 10000):
+            if self._is_port_available(port):
+                return port
+        return None
+
     def detect_project_type(self, files: List[str]) -> Dict[str, Any]:
         """
         Detect the type of project based on files.
@@ -394,7 +483,7 @@ class BuildEnvironment:
     
     def start_services(self) -> Dict[str, Any]:
         """
-        Start the project services.
+        Start the project services with dynamic port allocation.
         
         Returns:
             Service information.
@@ -408,35 +497,108 @@ class BuildEnvironment:
             return {
                 "success": False,
                 "message": "No run command available for this project type",
-                "service_urls": []
+                "service_urls": [],
+                "allocated_ports": {}
             }
         
-        # For simplicity, we won't actually start a long-running process
-        # In a real implementation, this would launch the service in the background
+        # Define preferred ports for each project type
+        preferred_ports = {
+            "flask": 5000,
+            "django": 8000,
+            "express": 3000,
+            "nodejs": 3000,
+            "nextjs": 3000,
+            "react": 3000,
+            "vue": 3000,
+            "vite": 5173
+        }
         
-        # Determine likely service URLs based on project type
-        service_urls = []
+        # Get preferred port and find available port
+        preferred_port = preferred_ports.get(self.project_type, 3000)
         
-        if self.project_type in ["flask", "django", "express", "nodejs"]:
-            service_urls.append("http://localhost:5000")  # Default for Flask
+        try:
+            allocated_port = self._find_available_port(preferred_port)
+            
+            # Update run command with allocated port if needed
+            updated_run_command = run_command
+            service_urls = []
             
             if self.project_type == "django":
-                service_urls.append("http://localhost:8000")  # Default for Django
+                # Update Django runserver command with allocated port
+                if allocated_port != 8000:
+                    updated_run_command = f"python manage.py runserver 0.0.0.0:{allocated_port}"
+                service_urls.append(f"http://localhost:{allocated_port}")
                 
-            if self.project_type in ["express", "nodejs"]:
-                service_urls.append("http://localhost:3000")  # Default for Express
+            elif self.project_type == "flask":
+                # Flask app.py should be updated to use PORT environment variable
+                if allocated_port != 5000:
+                    updated_run_command = f"PORT={allocated_port} {run_command}"
+                service_urls.append(f"http://localhost:{allocated_port}")
                 
-        elif self.project_type in ["nextjs", "react", "vue", "vite"]:
-            service_urls.append("http://localhost:3000")  # NextJS default
+            elif self.project_type in ["express", "nodejs"]:
+                # Express/Node.js should use PORT environment variable
+                if allocated_port != 3000:
+                    updated_run_command = f"PORT={allocated_port} {run_command}"
+                service_urls.append(f"http://localhost:{allocated_port}")
+                
+            elif self.project_type == "nextjs":
+                # Next.js uses -p flag for port
+                if allocated_port != 3000:
+                    if "npm run start" in run_command:
+                        updated_run_command = f"npm run start -- -p {allocated_port}"
+                    elif "npm start" in run_command:
+                        updated_run_command = f"npm start -- -p {allocated_port}"
+                service_urls.append(f"http://localhost:{allocated_port}")
+                
+            elif self.project_type == "vite":
+                # Vite uses --port flag
+                if allocated_port != 5173:
+                    updated_run_command = f"{run_command} --port {allocated_port}"
+                service_urls.append(f"http://localhost:{allocated_port}")
+                
+            elif self.project_type in ["react", "vue"]:
+                # React/Vue typically use PORT environment variable
+                if allocated_port != 3000:
+                    updated_run_command = f"PORT={allocated_port} {run_command}"
+                service_urls.append(f"http://localhost:{allocated_port}")
             
-            if self.project_type == "vite":
-                service_urls.append("http://localhost:5173")  # Vite default
+            else:
+                # For other project types, just provide the URL with allocated port
+                service_urls.append(f"http://localhost:{allocated_port}")
+            
+            return {
+                "success": True,
+                "message": f"Services configured to start on port {allocated_port}",
+                "run_command": updated_run_command,
+                "service_urls": service_urls,
+                "allocated_ports": {self.project_type: allocated_port},
+                "port_info": f"Port {allocated_port} allocated (preferred: {preferred_port})"
+            }
+            
+        except RuntimeError as e:
+            return {
+                "success": False,
+                "message": f"Failed to allocate port: {str(e)}",
+                "service_urls": [],
+                "allocated_ports": {},
+                "error": str(e)
+            }
+    
+    def stop_services(self) -> Dict[str, Any]:
+        """
+        Stop services and release allocated ports.
+        
+        Returns:
+            Results of stopping services.
+        """
+        # Release all allocated ports
+        released_ports = list(self.allocated_ports)
+        self.allocated_ports.clear()
         
         return {
             "success": True,
-            "message": f"Services started with command: {run_command}",
-            "run_command": run_command,
-            "service_urls": service_urls
+            "message": "Services stopped and ports released",
+            "released_ports": released_ports
         }
     
     def rebuild_and_restart(self) -> Dict[str, Any]:

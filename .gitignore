@@ -67,3 +67,6 @@ logs/
 *.html
 !index.html
 !templates/*.html
+
+# Automation Workspace
+automation_workspace/

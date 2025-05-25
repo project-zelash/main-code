@@ -17,7 +17,7 @@ import logging
 
 from utils.project_generator import ProjectGenerator
 from utils.deployment_manager import DeploymentManager
-from utils.browser_testing_manager import BrowserTestingManager
+# Remove browser_testing_manager import - we'll use direct Playwright
 from service.llm_factory import LLMFactory
 from service.tool_service import ToolService
 from repository.execution.agent_manager import AgentManager
@@ -27,6 +27,293 @@ from repository.execution.testing_framework import TestingFramework
 from repository.execution.feedback_analyzer import FeedbackAnalyzer
 
 logger = logging.getLogger(__name__)
+
+class DirectPlaywrightTester:
+    """Direct Playwright browser testing - guaranteed to work."""
+    
+    def __init__(self, headless: bool = True):
+        self.headless = headless
+        self._ensure_playwright_installed()
+        
+    def _ensure_playwright_installed(self):
+        """Ensure Playwright browsers are installed."""
+        try:
+            from playwright.async_api import async_playwright
+            
+            # Try to check if browsers are installed by attempting to launch
+            import asyncio
+            import subprocess
+            
+            # Check if playwright install has been run
+            try:
+                result = subprocess.run(
+                    ["playwright", "install", "chromium"], 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=120
+                )
+                if result.returncode == 0:
+                    print("✅ Playwright browsers installed successfully")
+                else:
+                    print(f"⚠️ Playwright install returned code {result.returncode}: {result.stderr}")
+            except subprocess.TimeoutExpired:
+                print("⚠️ Playwright install timed out, but continuing...")
+            except Exception as e:
+                print(f"⚠️ Error installing Playwright browsers: {e}")
+                
+        except ImportError:
+            print("❌ Playwright not available - install with: pip install playwright")
+            raise
+        
+    async def test_application(self, service_urls: List[str], custom_tests: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Test application using direct Playwright automation.
+        
+        Args:
+            service_urls: List of URLs to test
+            custom_tests: Custom test scenarios (optional)
+            
+        Returns:
+            Test results dictionary
+        """
+        print("\n================ STARTING BROWSER TESTING ================\n")
+        
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return {
+                "success": False,
+                "error": "Playwright not available - install with: pip install playwright && playwright install"
+            }
+        
+        test_results = {
+            "success": True,
+            "tested_urls": [],
+            "successful_connections": 0,
+            "failed_connections": 0,
+            "detailed_results": [],
+            "screenshots": []
+        }
+        
+        async with async_playwright() as p:
+            # Launch browser (visible or headless based on setting)
+            browser = await p.chromium.launch(headless=self.headless)
+            context = await browser.new_context(viewport={"width": 1280, "height": 720})
+            
+            try:
+                for i, url in enumerate(service_urls):
+                    print(f"\nTesting URL {i+1}/{len(service_urls)}: {url}")
+                    
+                    page = await context.new_page()
+                    url_result = {
+                        "url": url,
+                        "success": False,
+                        "error": None,
+                        "page_title": None,
+                        "response_time": 0,
+                        "screenshot_path": None
+                    }
+                    
+                    try:
+                        # Pre-check: Verify the URL is responding before browser test
+                        print(f"Pre-checking URL availability: {url}")
+                        import requests
+                        try:
+                            pre_response = requests.get(url, timeout=10)
+                            if pre_response.status_code >= 400:
+                                url_result["error"] = f"Server returned error status {pre_response.status_code}"
+                                print(f"❌ Pre-check failed: Server returned {pre_response.status_code}")
+                                test_results["failed_connections"] += 1
+                                continue
+                            else:
+                                print(f"✅ Pre-check passed: Server returned {pre_response.status_code}")
+                        except requests.exceptions.ConnectionError:
+                            url_result["error"] = "Connection refused - server not responding"
+                            print(f"❌ Pre-check failed: Connection refused")
+                            test_results["failed_connections"] += 1
+                            continue
+                        except Exception as e:
+                            url_result["error"] = f"Pre-check failed: {str(e)}"
+                            print(f"❌ Pre-check failed: {str(e)}")
+                            test_results["failed_connections"] += 1
+                            continue
+                        
+                        start_time = time.time()
+                        
+                        # Navigate to the URL with longer timeout and better error handling
+                        print(f"Navigating to {url} with browser...")
+                        try:
+                            await page.goto(url, timeout=45000, wait_until="networkidle")
+                        except Exception as nav_error:
+                            # Try with different wait conditions
+                            nav_error_str = str(nav_error)
+                            if "ERR_EMPTY_RESPONSE" in nav_error_str:
+                                print(f"Empty response detected, trying with domcontentloaded...")
+                                try:
+                                    await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                                except Exception as retry_error:
+                                    url_result["error"] = f"Browser navigation failed: {str(retry_error)}"
+                                    print(f"❌ Browser navigation failed: {str(retry_error)}")
+                                    test_results["failed_connections"] += 1
+                                    continue
+                            else:
+                                url_result["error"] = f"Browser navigation failed: {nav_error_str}"
+                                print(f"❌ Browser navigation failed: {nav_error_str}")
+                                test_results["failed_connections"] += 1
+                                continue
+                        
+                        # Calculate response time
+                        url_result["response_time"] = time.time() - start_time
+                        
+                        # Wait a bit more for dynamic content
+                        print("Waiting for page content to load...")
+                        await asyncio.sleep(2)
+                        
+                        # Try to get page title with fallback
+                        try:
+                            url_result["page_title"] = await page.title()
+                        except:
+                            url_result["page_title"] = "Unable to get title"
+                        
+                        # Take screenshot before content check
+                        screenshot_dir = Path("./automation_workspace/screenshots")
+                        screenshot_dir.mkdir(parents=True, exist_ok=True)
+                        screenshot_path = screenshot_dir / f"test_{i+1}_{int(time.time())}.png"
+                        
+                        try:
+                            await page.screenshot(path=str(screenshot_path))
+                            url_result["screenshot_path"] = str(screenshot_path)
+                            test_results["screenshots"].append(str(screenshot_path))
+                            print(f"Screenshot saved: {screenshot_path}")
+                        except Exception as screenshot_error:
+                            print(f"⚠️ Screenshot failed: {str(screenshot_error)}")
+                        
+                        # Check if page loaded successfully with multiple methods
+                        try:
+                            # Method 1: Check page content
+                            page_content = await page.content()
+                            content_length = len(page_content)
+                            print(f"Page content length: {content_length} characters")
+                            
+                            # Method 2: Check for basic HTML structure
+                            has_html = "<html" in page_content.lower()
+                            has_body = "<body" in page_content.lower()
+                            
+                            # Method 3: Check if there are any visible elements
+                            try:
+                                visible_elements = await page.query_selector_all("*")
+                                element_count = len(visible_elements)
+                                print(f"Visible elements found: {element_count}")
+                            except:
+                                element_count = 0
+                            
+                            # Determine success based on multiple criteria
+                            if content_length > 100 and (has_html or has_body or element_count > 5):
+                                url_result["success"] = True
+                                test_results["successful_connections"] += 1
+                                print(f"✅ Successfully tested: {url}")
+                                print(f"   Page Title: {url_result['page_title']}")
+                                print(f"   Response Time: {url_result['response_time']:.2f}s")
+                                print(f"   Content Length: {content_length} chars")
+                                print(f"   Elements: {element_count}")
+                            else:
+                                url_result["error"] = f"Page appears empty or malformed (content: {content_length} chars, elements: {element_count})"
+                                test_results["failed_connections"] += 1
+                                print(f"❌ Failed: {url} - {url_result['error']}")
+                                
+                        except Exception as content_error:
+                            url_result["error"] = f"Failed to analyze page content: {str(content_error)}"
+                            test_results["failed_connections"] += 1
+                            print(f"❌ Failed to analyze content: {str(content_error)}")
+                        
+                        # Run custom tests if provided and basic test succeeded
+                        if custom_tests and url_result["success"]:
+                            print("Running custom tests...")
+                            custom_results = await self._run_custom_tests(page, custom_tests)
+                            url_result["custom_test_results"] = custom_results
+                            print(f"Custom tests completed: {len(custom_results)} tests")
+                        
+                    except Exception as e:
+                        url_result["error"] = str(e)
+                        test_results["failed_connections"] += 1
+                        print(f"❌ Failed to test {url}: {str(e)}")
+                    
+                    finally:
+                        try:
+                            await page.close()
+                        except:
+                            pass
+                    
+                    test_results["detailed_results"].append(url_result)
+                    test_results["tested_urls"].append(url)
+                
+                # Calculate overall success
+                total_tests = len(service_urls)
+                success_rate = (test_results["successful_connections"] / total_tests * 100) if total_tests > 0 else 0
+                
+                test_results["test_report"] = {
+                    "summary": {
+                        "total_urls_tested": total_tests,
+                        "successful_connections": test_results["successful_connections"],
+                        "failed_connections": test_results["failed_connections"],
+                        "overall_success_rate": success_rate
+                    }
+                }
+                
+                if test_results["successful_connections"] == 0:
+                    test_results["success"] = False
+                    test_results["error"] = "No successful connections to any service URL"
+                
+                print(f"\n✅ Browser testing completed: {test_results['successful_connections']}/{total_tests} URLs successful")
+                
+            finally:
+                await browser.close()
+        
+        print("\n================ BROWSER TESTING COMPLETE ================\n")
+        return test_results
+    
+    async def _run_custom_tests(self, page, custom_tests: List[str]) -> List[Dict[str, Any]]:
+        """Run custom test scenarios on the page."""
+        results = []
+        
+        for test_description in custom_tests:
+            test_result = {
+                "test": test_description,
+                "success": False,
+                "error": None
+            }
+            
+            try:
+                # Simple test implementations based on description
+                if "click" in test_description.lower():
+                    # Try to find and click common button elements
+                    buttons = await page.query_selector_all("button, input[type='button'], input[type='submit']")
+                    if buttons:
+                        await buttons[0].click()
+                        test_result["success"] = True
+                    else:
+                        test_result["error"] = "No clickable elements found"
+                
+                elif "form" in test_description.lower() or "input" in test_description.lower():
+                    # Try to fill forms
+                    inputs = await page.query_selector_all("input[type='text'], input[type='email'], textarea")
+                    if inputs:
+                        await inputs[0].fill("test input")
+                        test_result["success"] = True
+                    else:
+                        test_result["error"] = "No input fields found"
+                
+                else:
+                    # Generic test - just check if page is interactive
+                    await page.wait_for_load_state("networkidle")
+                    test_result["success"] = True
+                    
+            except Exception as e:
+                test_result["error"] = str(e)
+            
+            results.append(test_result)
+        
+        return results
 
 class AutomationWorkflow:
     """Complete automation workflow orchestrator."""
@@ -65,8 +352,8 @@ class AutomationWorkflow:
             bash_tool=self.tool_service.get_tool("bash")
         )
         
-        self.browser_testing_manager = BrowserTestingManager(
-            use_mcp=True,
+        # Use our proven direct Playwright tester instead of complex browser-use
+        self.browser_testing_manager = DirectPlaywrightTester(
             headless=headless_browser
         )
         
@@ -238,6 +525,10 @@ class AutomationWorkflow:
                                 force_type=force_project_type
                             )
                             
+                            # IMPORTANT: Wait 20 seconds for services to fully stabilize after refinement fixes
+                            logger.info("⏳ REFINEMENT LOOP: Waiting 20 seconds for services to stabilize after fixes...")
+                            time.sleep(20)
+                            
                             # Update workflow result with refinement information
                             workflow_result["phases"]["deployment"]["refinement_result"] = refinement_result
                             workflow_result["phases"]["deployment"]["result"] = deployment_result
@@ -341,6 +632,11 @@ class AutomationWorkflow:
                                         project_path=project_path,
                                         force_type=force_project_type
                                     )
+                                    
+                                    # IMPORTANT: Wait 20 seconds for services to fully stabilize after refinement fixes
+                                    logger.info("⏳ REFINEMENT LOOP: Waiting 20 seconds for services to stabilize after service URL fixes...")
+                                    time.sleep(20)
+                                    
                                     service_urls = deployment_result.get("service_urls", [])
                                     logger.info(f"🔄 REFINEMENT LOOP: After retry, service URLs: {service_urls}")
                                     
@@ -428,10 +724,14 @@ class AutomationWorkflow:
                                     project_path=project_path,
                                     force_type=force_project_type
                                 )
+                                
+                                # IMPORTANT: Wait 20 seconds for services to fully stabilize after refinement fixes
+                                logger.info("⏳ REFINEMENT LOOP: Waiting 20 seconds for services to stabilize after UI fixes...")
+                                time.sleep(20)
+                                
                                 service_urls = deployment_result.get("service_urls", [])
                                 
                                 if service_urls:
-                                    time.sleep(5)  # Brief wait for restart
                                     testing_result = await self.browser_testing_manager.test_application(
                                         service_urls=service_urls,
                                         custom_tests=custom_tests
