@@ -1111,6 +1111,10 @@ def stop_all_services():
     manager = DeploymentManager()
     return manager.stop_all_deployments()
 
+
+# Backward-compatible name used by older tests and documentation.
+SmartDeploymentManager = DeploymentManager
+
 if __name__ == "__main__":
     # Test the deployment manager
     manager = DeploymentManager()

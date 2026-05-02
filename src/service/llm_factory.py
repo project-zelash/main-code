@@ -2,6 +2,7 @@ from src.repository.llm.openai_llm import OpenAILLM
 from src.repository.llm.anthropic_llm import AnthropicLLM
 from src.repository.llm.bedrock_llm import BedrockLLM
 from src.repository.llm.gemini_llm import GeminiLLM
+import os
 
 class LLMFactory:
     """
@@ -17,7 +18,7 @@ class LLMFactory:
         """
         self.config = config or {}
         
-    def create_llm(self, provider, model=None, temperature=None, api_key=None, credentials=None):
+    def create_llm(self, provider=None, model=None, temperature=None, api_key=None, credentials=None):
         """
         Create an LLM instance based on specified parameters.
         
@@ -32,6 +33,7 @@ class LLMFactory:
             LLM instance.
         """
         # Get default values from config if not specified
+        provider = (provider or self.config.get("default_provider") or "gemini").lower()
         provider_config = self.config.get(provider, {})
         
         model = model or provider_config.get('model')
@@ -43,11 +45,13 @@ class LLMFactory:
         if provider == 'openai':
             if not model:
                 model = 'gpt-4o'
+            api_key = api_key or os.getenv("OPENAI_API_KEY")
             return OpenAILLM(model=model, api_key=api_key, temperature=temperature)
         
         elif provider == 'anthropic':
             if not model:
-                model = 'claude-3-sonnet'
+                model = 'claude-3-5-sonnet-latest'
+            api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
             return AnthropicLLM(model=model, api_key=api_key, temperature=temperature)
         
         elif provider == 'bedrock':
@@ -64,10 +68,14 @@ class LLMFactory:
         elif provider == 'gemini':
             if not model:
                 model = 'gemini-2.0-flash'  # Use Gemini 2.0 Flash as the default
+            api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
             return GeminiLLM(model=model, api_key=api_key, temperature=temperature)
         
         else:
             raise ValueError(f"Unknown LLM provider: {provider}")
+
+    def create_default_llm(self):
+        return self.create_llm(self.config.get("default_provider", "gemini"))
     
     def update_config(self, new_config):
         """

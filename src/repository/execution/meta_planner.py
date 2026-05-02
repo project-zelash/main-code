@@ -22,7 +22,7 @@ class MetaPlanner:
             llm_factory: Factory for creating LLM instances.
         """
         self.llm_factory = llm_factory
-        self.llm = self.llm_factory.create_llm("gemini")
+        self.llm = self.llm_factory.create_default_llm()
     
     def decompose_project(self, description: str) -> Dict[str, Any]:
         """

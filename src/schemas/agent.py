@@ -34,15 +34,16 @@ class CreateAgentRequest(BaseModel):
     type: str = Field(..., description="Agent type (analysis, research, writing, etc.)")
     name: str = Field(..., description="Display name for the agent")
     description: str = Field(..., description="Short description of the agent's purpose")
-    config: Optional[Dict[str, Any]] = Field(None, description="Additional configuration options")
+    config: Optional[AgentConfig] = Field(None, description="Additional configuration options")
 
 class AgentResponse(BaseModel):
     """Response containing agent information."""
     id: str = Field(..., description="Unique identifier for the agent")
     type: str = Field(..., description="Agent type")
     name: str = Field(..., description="Display name for the agent")
-    description: str = Field(..., description="Short description of the agent's purpose")
-    status: str = Field(..., description="Current status of the agent")
+    description: str = Field("", description="Short description of the agent's purpose")
+    status: str = Field("ready", description="Current status of the agent")
+    tools: List[str] = Field(default=[], description="Tools available to the agent")
 
 class ExecuteAgentRequest(BaseModel):
     """Request for executing an agent."""

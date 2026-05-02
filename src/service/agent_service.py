@@ -2,6 +2,10 @@ from src.repository.agent.general_agent import GeneralAgent
 from src.repository.agent.research_agent import ResearchAgent
 from src.repository.agent.analysis_agent import AnalysisAgent
 from src.repository.agent.writing_agent import WritingAgent
+from src.repository.agent.backend_agent import BackendAgent
+from src.repository.agent.frontend_agent import FrontendAgent
+from src.repository.agent.middleware_agent import MiddlewareAgent
+from src.repository.agent.design_agent import DesignAgent
 from src.repository.agent.tool_call_agent import ToolCallAgent as ManusAgent
 from src.repository.tools.base_tool import BaseTool
 from src.repository.llm.base_language_model import BaseLanguageModel
@@ -37,14 +41,14 @@ class AgentService:
         # Get LLM
         llm_config = agent_config.get("llm", {})
         llm = self.llm_factory.create_llm(
-            provider=llm_config.get("provider", "openai"),
+            provider=llm_config.get("provider"),
             model=llm_config.get("model"),
             temperature=llm_config.get("temperature", 0.7)
         )
         
         # Get tools
         tool_names = agent_config.get("tools", [])
-        tools = self.tool_service.get_tools(tool_names)
+        tools = list(self.tool_service.get_tools(tool_names).values())
         
         # Create agent based on type
         agent = None
@@ -81,6 +85,14 @@ class AgentService:
                 verbose=agent_config.get("verbose", False),
                 max_iterations=agent_config.get("max_iterations", 5)
             )
+        elif agent_type == "backend":
+            agent = BackendAgent(llm=llm, tools=tools, name=agent_config.get("name", "BackendAgent"), verbose=agent_config.get("verbose", False), max_iterations=agent_config.get("max_iterations", 5))
+        elif agent_type == "frontend":
+            agent = FrontendAgent(llm=llm, tools=tools, name=agent_config.get("name", "FrontendAgent"), verbose=agent_config.get("verbose", False), max_iterations=agent_config.get("max_iterations", 5))
+        elif agent_type == "middleware":
+            agent = MiddlewareAgent(llm=llm, tools=tools, name=agent_config.get("name", "MiddlewareAgent"), verbose=agent_config.get("verbose", False), max_iterations=agent_config.get("max_iterations", 5))
+        elif agent_type == "design":
+            agent = DesignAgent(llm=llm, tools=tools, name=agent_config.get("name", "DesignAgent"), verbose=agent_config.get("verbose", False), max_iterations=agent_config.get("max_iterations", 5))
         elif agent_type == "general":
             agent = GeneralAgent(
                 llm=llm,
@@ -93,9 +105,8 @@ class AgentService:
             raise ValueError(f"Unknown agent type: {agent_type}")
         
         # Store agent if ID is provided
-        agent_id = agent_config.get("id")
-        if agent_id:
-            self.agents[agent_id] = agent
+        agent_id = agent_config.get("id") or agent_config.get("name") or agent_type
+        self.agents[agent_id] = agent
             
         return agent
     

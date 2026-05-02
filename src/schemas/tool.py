@@ -13,7 +13,7 @@ class ToolConfig(BaseModel):
     id: Optional[str] = Field(None, description="Unique identifier for the tool")
     name: str = Field(..., description="Display name for the tool")
     description: str = Field(..., description="Short description of the tool's purpose")
-    schema: ToolSchema = Field(..., description="Schema definition for the tool")
+    schema_: ToolSchema = Field(..., alias="schema", description="Schema definition for the tool")
     config: Optional[Dict[str, Any]] = Field(None, description="Additional configuration options")
 
 class CreateToolRequest(BaseModel):
@@ -23,10 +23,11 @@ class CreateToolRequest(BaseModel):
 
 class ToolResponse(BaseModel):
     """Response containing tool information."""
-    id: str = Field(..., description="Unique identifier for the tool")
-    type: str = Field(..., description="Tool type")
+    id: Optional[str] = Field(None, description="Unique identifier for the tool")
+    type: Optional[str] = Field(None, description="Tool type")
     name: str = Field(..., description="Display name for the tool")
     description: str = Field(..., description="Short description of the tool's purpose")
+    schema_: Optional[Dict[str, Any]] = Field(None, alias="schema", description="Tool argument schema")
 
 class ExecuteToolRequest(BaseModel):
     """Request for executing a tool."""
@@ -38,3 +39,17 @@ class ExecuteToolResponse(BaseModel):
     input: Dict[str, Any] = Field(..., description="Tool input parameters")
     output: Any = Field(..., description="Tool execution result")
     error: Optional[str] = Field(None, description="Error message if execution failed")
+
+class ToolConfigUpdate(BaseModel):
+    """Request to merge tool-service configuration."""
+    config: Dict[str, Any] = Field(..., description="Configuration patch")
+
+class ToolRegistration(BaseModel):
+    """Request to register a remote MCP tool."""
+    name: str = Field(..., description="Remote tool name")
+    description: str = Field(..., description="Remote tool description")
+    args_schema: Dict[str, Any] = Field(default_factory=dict, description="Remote tool JSON schema")
+
+class MCPConnection(BaseModel):
+    """Request to connect to an MCP websocket server."""
+    server_url: str = Field("ws://localhost:8765", description="MCP server websocket URL")

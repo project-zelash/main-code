@@ -14,10 +14,10 @@ from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 import logging
 
-from repository.execution.orchestration_engine import OrchestrationEngine
-from service.llm_factory import LLMFactory
-from service.tool_service import ToolService
-from utils.prompt_manager import PromptManager
+from src.repository.execution.orchestration_engine import OrchestrationEngine
+from src.service.llm_factory import LLMFactory
+from src.service.tool_service import ToolService
+from src.utils.prompt_manager import PromptManager
 
 logger = logging.getLogger(__name__)
 
@@ -334,9 +334,9 @@ class ProjectGenerator:
 # Convenience functions for easy import
 def generate_project_quick(prompt: str, workspace_path: str = "./generated_projects") -> Dict[str, Any]:
     """Quick project generation with minimal setup."""
-    from service.llm_factory import LLMFactory
-    from service.tool_service import ToolService
-    from repository.tools.bash_tool import BashTool
+    from src.service.llm_factory import LLMFactory
+    from src.service.tool_service import ToolService
+    from src.repository.tools.bash_tool import BashTool
     
     # Setup basic services
     llm_factory = LLMFactory()

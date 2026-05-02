@@ -12,8 +12,9 @@ class ToolService:
     Service for managing tool instances and configurations.
     """
     
-    def __init__(self, config=None):
+    def __init__(self, config=None, llm_factory=None):
         self.config = config or {}
+        self.llm_factory = llm_factory
         self.tools = {}
         self.mcp_client = None
         self._initialize_default_tools()

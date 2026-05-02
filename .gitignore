@@ -75,6 +75,8 @@ automation_workspace/
 node_modules
 dist
 dist-ssr
+.next/
+out/
 *.local
 npm-debug.log*
 yarn-debug.log*

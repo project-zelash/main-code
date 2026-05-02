@@ -74,5 +74,8 @@ class GeneralAgent(ToolCallAgent):
         Returns:
             String containing default system prompt.
         """
-        # Implementation will return a well-crafted default system prompt
-        pass
+        return (
+            "You are a precise autonomous software agent. Respond with structured, actionable output. "
+            "When the task asks for files, return a JSON array of objects with path and content keys. "
+            "When the task asks for analysis or research, return concise prose with clear sections."
+        )

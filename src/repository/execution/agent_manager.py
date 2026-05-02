@@ -3,6 +3,10 @@ from typing import Any, Dict, Optional
 from src.repository.agent.backend_agent import BackendAgent
 from src.repository.agent.frontend_agent import FrontendAgent
 from src.repository.agent.middleware_agent import MiddlewareAgent
+from src.repository.agent.design_agent import DesignAgent
+from src.repository.agent.research_agent import ResearchAgent
+from src.repository.agent.analysis_agent import AnalysisAgent
+from src.repository.agent.writing_agent import WritingAgent
 from src.service.llm_factory import LLMFactory
 from src.service.tool_service import ToolService
 
@@ -15,7 +19,7 @@ class AgentManager:
 
     def _initialize_agents(self):
         if not self.agents:
-            llm = self.llm_factory.create_llm("gemini", "gemini-2.0-flash")
+            llm = self.llm_factory.create_default_llm()
             tools = list(self.tool_service.get_tools().values())  # Ensure this is a list of tool instances
             # Register all default agents with a consistent structure
             self.register_agent(
@@ -48,7 +52,10 @@ class AgentManager:
                 ),
                 capabilities={"type": "frontend"}
             )
-            # Do NOT register design agent
+            self.register_agent("design", DesignAgent(llm=llm, tools=tools, verbose=True), capabilities={"type": "design"})
+            self.register_agent("research", ResearchAgent(llm=llm, tools=tools, verbose=True), capabilities={"type": "research"})
+            self.register_agent("analysis", AnalysisAgent(llm=llm, tools=tools, verbose=True), capabilities={"type": "analysis"})
+            self.register_agent("writing", WritingAgent(llm=llm, tools=tools, verbose=True), capabilities={"type": "writing"})
 
     def register_agent(self, agent_name: str, agent_instance: Any, capabilities: dict = None) -> None:
         self.agents[agent_name] = {
@@ -62,8 +69,21 @@ class AgentManager:
             return {"status": "error", "message": f"Agent {agent_name} not registered."}
         agent = agent_entry["instance"]
         task_context = task.get("context") or context
-        result = agent.run(task["input"], context=task_context)
-        return result
+        try:
+            result = agent.run(task["input"], context=task_context)
+            return {
+                "status": "completed",
+                "agent": agent_name,
+                "task_id": task.get("id") or task.get("name"),
+                "output": result,
+            }
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "agent": agent_name,
+                "task_id": task.get("id") or task.get("name"),
+                "error": str(exc),
+            }
 
     def list_agents(self) -> list:
         return [

@@ -32,6 +32,12 @@ class ToolCallAgent(BaseAgent):
         self.max_iterations = max_iterations
         self.memory = MemorySystem()
         self.current_iteration = 0
+        self.requires_codegen_json = self.name.lower().replace("agent", "") in {
+            "backend",
+            "frontend",
+            "middleware",
+            "design",
+        }
         
         # Create tool mapping for easy lookup
         self.tool_map = {tool.name: tool for tool in self.tools}
@@ -109,7 +115,7 @@ class ToolCallAgent(BaseAgent):
                     
                     content = response.get('content', '')
                     # Output validation for codegen tasks
-                    if not self._is_valid_codegen_response(content):
+                    if self.requires_codegen_json and not self._is_valid_codegen_response(content):
                         if retries < max_retries:
                             logger.warning(f"[LLM RETRY] Invalid output, retrying with fallback prompt (attempt {retries+1})")
                             # Add fallback prompt as user message

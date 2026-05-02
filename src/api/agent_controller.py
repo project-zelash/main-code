@@ -37,18 +37,28 @@ class AgentController:
         @self.app.post("/api/agents", response_model=AgentResponse)
         async def create_agent(request: CreateAgentRequest):
             try:
+                config = request.config
+                if config is None:
+                    config = AgentConfig(
+                        id=str(uuid.uuid4()),
+                        name=request.name,
+                        llm=LLMConfig(provider="gemini", model="gemini-2.0-flash"),
+                        tools=[],
+                    )
                 # Generate unique ID if not provided
-                if not request.config.id:
-                    request.config.id = str(uuid.uuid4())
+                if not config.id:
+                    config.id = str(uuid.uuid4())
                 
                 # Create agent
-                agent = self.agent_service.create_agent(request.type, request.config.dict())
+                agent = self.agent_service.create_agent(request.type, config.model_dump())
                 
                 return {
-                    "id": request.config.id,
+                    "id": config.id,
                     "type": request.type,
                     "name": agent.name,
-                    "tools": list(request.config.tools)
+                    "description": request.description,
+                    "status": "ready",
+                    "tools": list(config.tools)
                 }
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
@@ -63,6 +73,8 @@ class AgentController:
                         "id": agent_id,
                         "type": agent.__class__.__name__.replace("Agent", "").lower(),
                         "name": agent.name,
+                        "description": getattr(agent, "system_prompt", "")[:160],
+                        "status": "ready",
                         "tools": [tool.name for tool in agent.tools]
                     })
                 return result
@@ -80,6 +92,8 @@ class AgentController:
                 "id": agent_id,
                 "type": agent.__class__.__name__.replace("Agent", "").lower(),
                 "name": agent.name,
+                "description": getattr(agent, "system_prompt", "")[:160],
+                "status": "ready",
                 "tools": [tool.name for tool in agent.tools]
             }
         

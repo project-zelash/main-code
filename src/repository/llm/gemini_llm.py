@@ -1,6 +1,6 @@
 from src.repository.llm.base_language_model import BaseLanguageModel
-import google.generativeai as genai
 import os
+import time
 
 import re
 import json
@@ -38,9 +38,8 @@ class GeminiLLM(BaseLanguageModel):
         if self.api_key:
             # Set environment variable for Google AI to use
             os.environ['GOOGLE_API_KEY'] = self.api_key
-            genai.configure(api_key=self.api_key)
         else:
-            raise ValueError("GEMINI_API_KEY not provided and not found in environment variables")
+            raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY is required when LLM_PROVIDER=gemini")
     
     def chat(self, messages, tools=None):
         """
@@ -53,6 +52,19 @@ class GeminiLLM(BaseLanguageModel):
         Returns:
             Response from the Gemini language model.
         """
+        last_error = None
+        for attempt in range(3):
+            try:
+                return self._chat_once(messages, tools)
+            except Exception as exc:
+                last_error = exc
+                if "rate" in str(exc).lower() or "429" in str(exc):
+                    time.sleep(2 ** attempt)
+                    continue
+                raise
+        raise RuntimeError(f"Gemini API error after retries: {last_error}")
+
+    def _chat_once(self, messages, tools=None):
         try:
             # Try to use the new google.genai client for function calling
             from google import genai as new_genai
@@ -86,7 +98,7 @@ class GeminiLLM(BaseLanguageModel):
         except ImportError:
             # Fallback to old genai client without function calling
             return self._chat_fallback(messages, tools)
-        except Exception as e:
+        except Exception:
             # Fallback to old genai client if new one fails
             return self._chat_fallback(messages, tools)
     
@@ -246,6 +258,8 @@ class GeminiLLM(BaseLanguageModel):
             prompt += "\n\nIf you need to use a tool, please mention which tool you would use and why."
         
         # Initialize model and generate response
+        import google.generativeai as genai
+        genai.configure(api_key=self.api_key)
         model = genai.GenerativeModel(
             model_name=self.model,
             generation_config=genai.GenerationConfig(temperature=self.temperature)
@@ -325,5 +339,3 @@ class GeminiLLM(BaseLanguageModel):
             else:
                 prompt_parts.append(f"{role.upper()}: {content}")
         return "\n\n".join(prompt_parts)
-
-

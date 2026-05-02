@@ -15,16 +15,16 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 import logging
 
-from utils.project_generator import ProjectGenerator
-from utils.deployment_manager import DeploymentManager
+from src.utils.project_generator import ProjectGenerator
+from src.utils.deployment_manager import DeploymentManager
 # Remove browser_testing_manager import - we'll use direct Playwright
-from service.llm_factory import LLMFactory
-from service.tool_service import ToolService
-from repository.execution.agent_manager import AgentManager
-from repository.tools.bash_tool import BashTool
-from repository.execution.build_test_manager import BuildTestManager
-from repository.execution.testing_framework import TestingFramework
-from repository.execution.feedback_analyzer import FeedbackAnalyzer
+from src.service.llm_factory import LLMFactory
+from src.service.tool_service import ToolService
+from src.repository.execution.agent_manager import AgentManager
+from src.repository.tools.bash_tool import BashTool
+from src.repository.execution.build_test_manager import BuildTestManager
+from src.repository.execution.testing_framework import TestingFramework
+from src.repository.execution.feedback_analyzer import FeedbackAnalyzer
 
 logger = logging.getLogger(__name__)
 
